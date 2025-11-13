@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    /* Node backend basics */
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node16",
+    "rootDir": "src",
+    "outDir": "dist",
+
+    /* Types */
+    "types": ["node"],
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    /* Safety */
+    "strict": true
+  },
+  "include": ["src"]
+}
