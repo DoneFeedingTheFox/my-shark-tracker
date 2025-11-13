@@ -16,7 +16,7 @@ const defaultIcon = new L.Icon({
 
 L.Marker.prototype.options.icon = defaultIcon;
 
-const DATA_URL = "/data/luna_track.json";
+const DATA_URL = `${import.meta.env.BASE_URL}data/luna_track.json`;
 
 export default function SharkMap() {
   const [shark, setShark] = useState(null);
