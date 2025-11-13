@@ -1,0 +1,37 @@
+{
+  "id": 1,
+  "name": "Luna",
+  "species": "Carcharodon carcharias",
+  "pings": [
+    {
+      "timestamp": "2023-05-01T12:00:00Z",
+      "latitude": -34.356,
+      "longitude": 18.473,
+      "water_temp_c": 14.0
+    },
+    {
+      "timestamp": "2023-05-02T12:00:00Z",
+      "latitude": -34.301,
+      "longitude": 18.52,
+      "water_temp_c": 14.3
+    },
+    {
+      "timestamp": "2023-05-03T12:00:00Z",
+      "latitude": -34.25,
+      "longitude": 18.58,
+      "water_temp_c": 14.6
+    },
+    {
+      "timestamp": "2023-05-04T12:00:00Z",
+      "latitude": -34.21,
+      "longitude": 18.65,
+      "water_temp_c": 14.9
+    },
+    {
+      "timestamp": "2023-05-05T12:00:00Z",
+      "latitude": -34.18,
+      "longitude": 18.72,
+      "water_temp_c": 15.2
+    }
+  ]
+}
