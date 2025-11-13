@@ -1,42 +1,87 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+/* === Global page styling === */
+
+:root {
+  --bg: #020617;
+  --panel: rgba(15, 23, 42, 0.9);
+  --border: rgba(148, 163, 184, 0.2);
+  --text: #e5e7eb;
+  --text-muted: #94a3b8;
+  --accent: #38bdf8;
+  --rad: 18px;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top left, rgba(56,189,248,0.25), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(59,130,246,0.25), transparent 55%),
+    linear-gradient(135deg, #020617 0%, #000814 100%);
+
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+}
+
+/* === HEADER === */
+
+.app-header {
+  padding: 1.2rem 2rem;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: rgba(2,6,23,0.6);
+  backdrop-filter: blur(10px);
+}
+
+.app-header-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+  font-size: 1.8rem;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: 0.04em;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+.sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
-.card {
-  padding: 2em;
+/* === MAIN === */
+
+.app-main {
+  flex: 1;
+  display: flex;
+  padding: 1.4rem 2rem;
 }
 
-.read-the-docs {
-  color: #888;
+.panel {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--rad);
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+
+/* === FOOTER === */
+
+.app-footer {
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  background: rgba(2,6,23,0.7);
 }
