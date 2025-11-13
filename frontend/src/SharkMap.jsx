@@ -21,7 +21,7 @@ const DATA_URL = `${import.meta.env.BASE_URL}data/luna_track.json`;
 export default function SharkMap() {
   const [shark, setShark] = useState(null);
   const [track, setTrack] = useState([]);
-  const [remoteSharks, setRemoteSharks] = useState([]); // new: sharks from backend
+  const [remoteSharks, setRemoteSharks] = useState([]); 
 
   // Local Luna JSON
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function SharkMap() {
   useEffect(() => {
     async function fetchRemoteSharks() {
       try {
-        const resp = await fetch("http://localhost:3000/api/sharks");
+        const resp = await fetch("https://shark-backend-yz6s.onrender.com/api/sharks");
         if (!resp.ok) {
           throw new Error(`Shark API error: ${resp.status} ${resp.statusText}`);
         }
