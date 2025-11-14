@@ -1,0 +1,17 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\.github",
+    "\\.github\\workflows",
+    "\\backend",
+    "\\backend\\src",
+    "\\frontend",
+    "\\frontend\\public",
+    "\\frontend\\public\\data",
+    "\\frontend\\src",
+    "\\frontend\\src\\assets",
+    "\\scripts"
+  ],
+  "SelectedNode": "\\frontend\\src\\SharkMap.jsx",
+  "PreviewInSolutionExplorer": false
+}

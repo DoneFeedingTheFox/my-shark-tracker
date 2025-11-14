@@ -1,9 +1,9 @@
 ﻿// src/SharkMap.jsx
 import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "./SharkMap.css"; // 👈 new styling
+import "./SharkMap.css"; // styling
 
 // Fix default marker icon paths (Vite + Leaflet quirk)
 const defaultIcon = new L.Icon({
@@ -18,23 +18,43 @@ const defaultIcon = new L.Icon({
 
 L.Marker.prototype.options.icon = defaultIcon;
 
-const DATA_URL = `${import.meta.env.BASE_URL}data/luna_track.json`;
+const DEFAULT_MONTHS_BACK = 6;
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+function isSharkWithinMonths(shark, months) {
+  const timestamp =
+    shark.last_update ||
+    shark.lastMove ||
+    shark.last_move ||
+    shark.last_update_time ||
+    null;
+
+  if (!timestamp) return false;
+
+  const lastUpdate = new Date(timestamp);
+  if (isNaN(lastUpdate.getTime())) return false; // bad date
+
+  const now = new Date();
+  const diffDays = (now.getTime() - lastUpdate.getTime()) / MS_PER_DAY;
+  const maxDays = months * 30; // rough month length is fine
+
+  return diffDays <= maxDays;
+}
+
+function formatMonthsLabel(months) {
+  if (months < 12) {
+    return `${months} month${months === 1 ? "" : "s"}`;
+  }
+
+  const years = months / 12;
+  const rounded = years.toFixed(1);
+  return `${rounded} year${rounded === "1.0" ? "" : "s"}`;
+}
 
 export default function SharkMap() {
-  const [shark, setShark] = useState(null);
-  const [track, setTrack] = useState([]);
   const [remoteSharks, setRemoteSharks] = useState([]);
-
-  // Local Luna JSON
-  useEffect(() => {
-    fetch(DATA_URL)
-      .then((res) => res.json())
-      .then((data) => {
-        setShark(data);
-        setTrack(data.pings || []);
-      })
-      .catch((err) => console.error("Error fetching shark data:", err));
-  }, []);
+  const [monthsBack, setMonthsBack] = useState(DEFAULT_MONTHS_BACK);
+  const [selectedSharkId, setSelectedSharkId] = useState(null);
 
   // Remote sharks from your backend
   useEffect(() => {
@@ -59,82 +79,122 @@ export default function SharkMap() {
     fetchRemoteSharks();
   }, []);
 
-  const center = track.length
-    ? [track[0].latitude, track[0].longitude]
-    : [0, 0];
-
-  const polylinePositions = track.map((p) => [p.latitude, p.longitude]);
-  const lastPoint = track.length ? track[track.length - 1] : null;
-
   const activeRemote = remoteSharks.filter(
-    (s) => s.latitude != null && s.longitude != null
+    (s) =>
+      s.latitude != null &&
+      s.longitude != null &&
+      isSharkWithinMonths(s, monthsBack)
   );
+
+  const now = new Date();
+  const fromDate = new Date(now);
+  fromDate.setMonth(now.getMonth() - monthsBack);
+
+  // Derive selected shark from ID + active list
+  const selectedShark =
+    activeRemote.find((s) => s.id === selectedSharkId) ||
+    (activeRemote.length > 0 ? activeRemote[0] : null);
+
+  // Map center: follow selected shark if any, else first active, else [0,0]
+  const center = selectedShark
+    ? [selectedShark.latitude, selectedShark.longitude]
+    : activeRemote.length
+    ? [activeRemote[0].latitude, activeRemote[0].longitude]
+    : [0, 0];
 
   return (
     <div className="shark-layout">
       {/* Sidebar */}
       <aside className="shark-sidebar">
-        <h2 className="panel-title">Luna overview</h2>
+        <h2 className="panel-title">Shark explorer</h2>
 
-        {!shark && <p className="muted">Loading local track…</p>}
+        {/* Time filter slider */}
+        <div className="stat-card">
+          <div className="stat-label">Show sharks active in last</div>
+          <div className="stat-value">{formatMonthsLabel(monthsBack)}</div>
+          <input
+            type="range"
+            min={1}
+            max={36}
+            value={monthsBack}
+            onChange={(e) => setMonthsBack(Number(e.target.value))}
+          />
+          <div
+            className="muted"
+            style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}
+          >
+            Since {fromDate.toLocaleDateString()}
+          </div>
+        </div>
 
-        {shark && (
+        <div className="divider" />
+
+        <h3 className="panel-subtitle">Selected shark</h3>
+
+        {!selectedShark && (
+          <p className="muted">
+            No sharks in this time range. Try moving the slider to include more
+            months, then click a marker on the map to see details.
+          </p>
+        )}
+
+        {selectedShark && (
           <>
             <div className="stat-card">
               <div className="stat-label">Name</div>
-              <div className="stat-value">{shark.name}</div>
+              <div className="stat-value">{selectedShark.name}</div>
             </div>
+
             <div className="stat-card">
               <div className="stat-label">Species</div>
-              <div className="stat-value">{shark.species}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Track points</div>
-              <div className="stat-value">{track.length}</div>
-            </div>
-            {lastPoint && (
-              <div className="stat-card">
-                <div className="stat-label">Last local ping</div>
-                <div className="stat-value">
-                  {new Date(lastPoint.timestamp).toLocaleString()}
-                </div>
+              <div className="stat-value">
+                {selectedShark.species || "Unknown species"}
               </div>
-            )}
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Last update</div>
+              <div className="stat-value">
+                {selectedShark.last_update
+                  ? new Date(selectedShark.last_update).toLocaleString()
+                  : selectedShark.lastMove || selectedShark.last_move
+                  ? new Date(
+                      selectedShark.lastMove || selectedShark.last_move
+                    ).toLocaleString()
+                  : "Unknown"}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Location</div>
+              <div className="stat-value">
+                Lat: {selectedShark.latitude.toFixed(3)}, Lon:{" "}
+                {selectedShark.longitude.toFixed(3)}
+              </div>
+            </div>
+
+            <p className="muted" style={{ marginTop: "0.5rem" }}>
+              Tip: click a different marker on the map to switch shark.
+            </p>
           </>
         )}
 
         <div className="divider" />
 
-        <h3 className="panel-subtitle">Live OCEARCH sharks</h3>
         <p className="muted">
-          Loaded <strong>{activeRemote.length}</strong> shark
-          {activeRemote.length === 1 ? "" : "s"} from backend.
+          Active in range: <strong>{activeRemote.length}</strong> / Total
+          fetched: <strong>{remoteSharks.length}</strong>
         </p>
-
-        <ul className="shark-list">
-          {activeRemote.slice(0, 6).map((s) => (
-            <li key={s.id} className="shark-list-item">
-              <div className="shark-list-name">{s.name}</div>
-              <div className="shark-list-meta">
-                {s.species || "Unknown species"}
-              </div>
-            </li>
-          ))}
-          {activeRemote.length > 6 && (
-            <li className="shark-list-more">
-              + {activeRemote.length - 6} more…
-            </li>
-          )}
-        </ul>
       </aside>
 
       {/* Map panel */}
       <section className="shark-map-panel">
         <div className="shark-map-header">
           <div>
-            <h2 className="panel-title">Track & live positions</h2>
+            <h2 className="panel-title">Shark map</h2>
             <p className="muted">
-              Luna&apos;s historical track plus current remote shark locations.
+              Current locations of tracked sharks from the backend. Click a
+              marker to see details in the sidebar.
             </p>
           </div>
         </div>
@@ -142,46 +202,51 @@ export default function SharkMap() {
         <div className="shark-map-container">
           <MapContainer
             center={center}
-            zoom={8}
+            zoom={4}
             className="shark-map"
             scrollWheelZoom={true}
           >
             <TileLayer
-              attribution='&copy; OpenStreetMap contributors'
+              attribution="&copy; OpenStreetMap contributors"
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {polylinePositions.length > 1 && (
-              <Polyline positions={polylinePositions} />
-            )}
-
-            {lastPoint && (
-              <Marker position={[lastPoint.latitude, lastPoint.longitude]}>
-                <Popup>
-                  <strong>Luna – latest position</strong>
-                  <br />
-                  {new Date(lastPoint.timestamp).toLocaleString()}
-                  <br />
-                  Lat: {lastPoint.latitude.toFixed(3)}, Lon:{" "}
-                  {lastPoint.longitude.toFixed(3)}
-                </Popup>
-              </Marker>
-            )}
-
             {/* Remote sharks */}
-            {activeRemote.map((s) => (
-              <Marker key={s.id} position={[s.latitude, s.longitude]}>
-                <Popup>
-                  <strong>{s.name}</strong>
-                  <br />
-                  {s.species}
-                  <br />
-                  Last move: {new Date(s.lastMove).toLocaleString()}
-                  <br />
-                  Lat: {s.latitude.toFixed(3)}, Lon: {s.longitude.toFixed(3)}
-                </Popup>
-              </Marker>
-            ))}
+            {activeRemote.map((s) => {
+              const lastTime =
+                s.last_update || s.lastMove || s.last_move || null;
+
+              return (
+                <Marker
+                  key={s.id}
+                  position={[s.latitude, s.longitude]}
+                  eventHandlers={{
+                    click() {
+                      setSelectedSharkId(s.id);
+                    },
+                  }}
+                >
+                  <Popup>
+                    <strong>{s.name}</strong>
+                    <br />
+                    {s.species || "Unknown species"}
+                    <br />
+                    {lastTime ? (
+                      <>
+                        Last update: {new Date(lastTime).toLocaleString()}
+                        <br />
+                      </>
+                    ) : (
+                      <>
+                        Last update: Unknown
+                        <br />
+                      </>
+                    )}
+                    Lat: {s.latitude.toFixed(3)}, Lon: {s.longitude.toFixed(3)}
+                  </Popup>
+                </Marker>
+              );
+            })}
           </MapContainer>
         </div>
       </section>
