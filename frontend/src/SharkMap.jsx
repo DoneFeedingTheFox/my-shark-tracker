@@ -1,6 +1,12 @@
 ﻿// src/SharkMap.jsx
 import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Polyline,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./SharkMap.css"; // styling
@@ -58,9 +64,15 @@ export default function SharkMap() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // NEW: track + playback state
+  const [selectedTrack, setSelectedTrack] = useState([]);
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [trackError, setTrackError] = useState(null);
+  const [playbackIndex, setPlaybackIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // Remote sharks from your backend
-    useEffect(() => {
+  useEffect(() => {
     async function fetchRemoteSharks() {
       try {
         setLoading(true);
@@ -88,7 +100,6 @@ export default function SharkMap() {
     fetchRemoteSharks();
   }, []);
 
-
   const activeRemote = remoteSharks.filter(
     (s) =>
       s.latitude != null &&
@@ -105,6 +116,86 @@ export default function SharkMap() {
     activeRemote.find((s) => s.id === selectedSharkId) ||
     (activeRemote.length > 0 ? activeRemote[0] : null);
 
+  // Fetch track from backend whenever selected shark changes
+  useEffect(() => {
+    async function fetchTrack() {
+      if (!selectedShark) {
+        setSelectedTrack([]);
+        setTrackLoading(false);
+        setTrackError(null);
+        setIsPlaying(false);
+        setPlaybackIndex(0);
+        return;
+      }
+
+      try {
+        setTrackLoading(true);
+        setTrackError(null);
+        setIsPlaying(false);
+        setPlaybackIndex(0);
+
+        const resp = await fetch(
+          `https://shark-backend-yz6s.onrender.com/api/sharks/${selectedShark.id}/track?hours=24`
+        );
+        if (!resp.ok) {
+          throw new Error(
+            `Track API error: ${resp.status} ${resp.statusText}`
+          );
+        }
+
+        const data = await resp.json();
+
+        // Make sure we have an array of { latitude, longitude, timestamp }
+        const cleaned = Array.isArray(data) ? data : [];
+        cleaned.sort((a, b) => {
+          const ta = new Date(a.timestamp || 0).getTime();
+          const tb = new Date(b.timestamp || 0).getTime();
+          return ta - tb;
+        });
+
+        setSelectedTrack(cleaned);
+        setPlaybackIndex(cleaned.length > 0 ? cleaned.length - 1 : 0);
+      } catch (err) {
+        console.error("Failed to fetch shark track:", err);
+        setTrackError(err.message || "Unknown track error");
+        setSelectedTrack([]);
+      } finally {
+        setTrackLoading(false);
+      }
+    }
+
+    fetchTrack();
+  }, [selectedShark?.id]);
+
+  // Auto-play effect
+  useEffect(() => {
+    if (!isPlaying || !selectedTrack || selectedTrack.length <= 1) return;
+
+    const maxIndex = selectedTrack.length - 1;
+
+    const interval = setInterval(() => {
+      setPlaybackIndex((prev) => {
+        if (prev >= maxIndex) {
+          clearInterval(interval);
+          return maxIndex;
+        }
+        return prev + 1;
+      });
+    }, 300); // ms between steps
+
+    return () => clearInterval(interval);
+  }, [isPlaying, selectedTrack]);
+
+  const playbackSafeIndex =
+    selectedTrack && selectedTrack.length
+      ? Math.min(playbackIndex, selectedTrack.length - 1)
+      : 0;
+
+  const currentPlaybackPoint =
+    selectedTrack && selectedTrack.length
+      ? selectedTrack[playbackSafeIndex]
+      : null;
+
   // Map center: follow selected shark if any, else first active, else [0,0]
   const center = selectedShark
     ? [selectedShark.latitude, selectedShark.longitude]
@@ -117,7 +208,7 @@ export default function SharkMap() {
       {/* Sidebar */}
       <aside className="shark-sidebar">
         <h2 className="panel-title">Shark explorer</h2>
-         {loading && (
+        {loading && (
           <p className="muted" style={{ marginBottom: "0.75rem" }}>
             Loading sharks from backend…
           </p>
@@ -131,7 +222,6 @@ export default function SharkMap() {
             Could not reach backend, please try again.
           </p>
         )}
-
 
         {/* Time filter slider */}
         <div className="stat-card">
@@ -165,13 +255,6 @@ export default function SharkMap() {
 
         {!loading && !error && selectedShark && (
           <>
-            {/* details... */}
-          </>
-        )}
-
-
-        {selectedShark && (
-          <>
             <div className="stat-card">
               <div className="stat-label">Name</div>
               <div className="stat-value">{selectedShark.name}</div>
@@ -203,6 +286,94 @@ export default function SharkMap() {
                 Lat: {selectedShark.latitude.toFixed(3)}, Lon:{" "}
                 {selectedShark.longitude.toFixed(3)}
               </div>
+            </div>
+
+            {/* Playback section */}
+            <div className="stat-card">
+              <div className="stat-label">Playback</div>
+
+              {trackLoading && (
+                <p className="muted" style={{ marginTop: "0.35rem" }}>
+                  Loading track…
+                </p>
+              )}
+
+              {!trackLoading && trackError && (
+                <p
+                  className="muted"
+                  style={{ marginTop: "0.35rem", color: "#f97373" }}
+                >
+                  Could not load track: {trackError}
+                </p>
+              )}
+
+              {!trackLoading &&
+                !trackError &&
+                selectedTrack.length === 0 && (
+                  <p className="muted" style={{ marginTop: "0.35rem" }}>
+                    No historical data available for this shark.
+                  </p>
+                )}
+
+              {!trackLoading &&
+                !trackError &&
+                selectedTrack.length > 1 && (
+                  <>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.75rem",
+                        marginTop: "0.35rem",
+                      }}
+                    >
+                      <button onClick={() => setIsPlaying((prev) => !prev)}>
+                        {isPlaying ? "Pause" : "Play"}
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={selectedTrack.length - 1}
+                        value={playbackSafeIndex}
+                        onChange={(e) => {
+                          setPlaybackIndex(Number(e.target.value));
+                          setIsPlaying(false); // dragging pauses playback
+                        }}
+                        style={{ flex: 1 }}
+                      />
+                    </div>
+
+                    <div
+                      className="muted"
+                      style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}
+                    >
+                      {selectedTrack[0]?.timestamp &&
+                        selectedTrack[selectedTrack.length - 1]?.timestamp && (
+                          <>
+                            {new Date(
+                              selectedTrack[0].timestamp
+                            ).toLocaleString()}{" "}
+                            →{" "}
+                            {new Date(
+                              selectedTrack[
+                                selectedTrack.length - 1
+                              ].timestamp
+                            ).toLocaleString()}
+                            <br />
+                          </>
+                        )}
+
+                      {currentPlaybackPoint?.timestamp && (
+                        <>
+                          Current:{" "}
+                          {new Date(
+                            currentPlaybackPoint.timestamp
+                          ).toLocaleString()}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
             </div>
 
             <p className="muted" style={{ marginTop: "0.5rem" }}>
@@ -243,7 +414,49 @@ export default function SharkMap() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {/* Remote sharks */}
+            {/* Track + playback marker for selected shark */}
+            {selectedTrack && selectedTrack.length > 0 && (
+              <>
+                {/* Full track */}
+                <Polyline
+                  positions={selectedTrack.map((p) => [
+                    p.latitude,
+                    p.longitude,
+                  ])}
+                />
+
+                {/* Played-so-far track */}
+                {selectedTrack.length > 1 && (
+                  <Polyline
+                    positions={selectedTrack
+                      .slice(0, playbackSafeIndex + 1)
+                      .map((p) => [p.latitude, p.longitude])}
+                  />
+                )}
+
+                {/* Moving playback marker */}
+                {currentPlaybackPoint && (
+                  <Marker
+                    position={[
+                      currentPlaybackPoint.latitude,
+                      currentPlaybackPoint.longitude,
+                    ]}
+                  >
+                    <Popup>
+                      <strong>{selectedShark?.name}</strong>
+                      <br />
+                      {currentPlaybackPoint.timestamp
+                        ? new Date(
+                            currentPlaybackPoint.timestamp
+                          ).toLocaleString()
+                        : "Playback point"}
+                    </Popup>
+                  </Marker>
+                )}
+              </>
+            )}
+
+            {/* Remote sharks (last known position) */}
             {activeRemote.map((s) => {
               const lastTime =
                 s.last_update || s.lastMove || s.last_move || null;
