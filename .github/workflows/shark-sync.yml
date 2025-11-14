@@ -1,0 +1,15 @@
+name: Shark Sync
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # every 3 hours
+  workflow_dispatch:        # allow manual run from GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call backend sync endpoint
+        run: |
+          curl -fsS https://shark-backend-yz6s.onrender.com/admin/refresh-sharks || exit 1
