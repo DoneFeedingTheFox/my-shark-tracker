@@ -55,11 +55,17 @@ export default function SharkMap() {
   const [remoteSharks, setRemoteSharks] = useState([]);
   const [monthsBack, setMonthsBack] = useState(DEFAULT_MONTHS_BACK);
   const [selectedSharkId, setSelectedSharkId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
 
   // Remote sharks from your backend
-  useEffect(() => {
+    useEffect(() => {
     async function fetchRemoteSharks() {
       try {
+        setLoading(true);
+        setError(null);
+
         const resp = await fetch(
           "https://shark-backend-yz6s.onrender.com/api/sharks"
         );
@@ -71,13 +77,17 @@ export default function SharkMap() {
         console.log("Remote sharks from backend:", data);
         console.log("First remote shark:", data[0]);
         setRemoteSharks(data);
+        setLoading(false);
       } catch (err) {
         console.error("Failed to fetch remote sharks:", err);
+        setError(err.message || "Unknown error");
+        setLoading(false);
       }
     }
 
     fetchRemoteSharks();
   }, []);
+
 
   const activeRemote = remoteSharks.filter(
     (s) =>
@@ -107,6 +117,21 @@ export default function SharkMap() {
       {/* Sidebar */}
       <aside className="shark-sidebar">
         <h2 className="panel-title">Shark explorer</h2>
+         {loading && (
+          <p className="muted" style={{ marginBottom: "0.75rem" }}>
+            Loading sharks from backend…
+          </p>
+        )}
+
+        {!loading && error && (
+          <p
+            className="muted"
+            style={{ marginBottom: "0.75rem", color: "#f97373" }}
+          >
+            Could not reach backend, please try again.
+          </p>
+        )}
+
 
         {/* Time filter slider */}
         <div className="stat-card">
@@ -131,12 +156,19 @@ export default function SharkMap() {
 
         <h3 className="panel-subtitle">Selected shark</h3>
 
-        {!selectedShark && (
+        {!loading && !error && !selectedShark && (
           <p className="muted">
             No sharks in this time range. Try moving the slider to include more
             months, then click a marker on the map to see details.
           </p>
         )}
+
+        {!loading && !error && selectedShark && (
+          <>
+            {/* details... */}
+          </>
+        )}
+
 
         {selectedShark && (
           <>
