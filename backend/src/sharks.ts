@@ -1,7 +1,7 @@
 // backend/src/sharks.ts
 import express from "express";
-import fetch from "node-fetch";
-import { supabaseAdmin } from "./lib/supabaseAdmin"; // <-- adjust path if needed
+// import fetch from "node-fetch"; // no longer needed
+import { supabaseAdmin } from "./lib/supabaseAdmin";
 
 export interface Shark {
   id: number;
@@ -21,85 +21,94 @@ export interface Shark {
 
 const router = express.Router();
 
-// tiny helper
-function getProp<T extends object, K extends keyof T>(
-  obj: T | undefined | null,
-  key: K
-): T[K] | undefined {
-  return obj ? obj[key] : undefined;
-}
-
 /**
  * GET /api/sharks
- * Proxies Mapotic and returns the current shark list.
+ *
+ * Now served from Supabase instead of the external API.
+ * Uses:
+ *   sharks(external_id, name, species, meta)
+ *   shark_positions(shark_id, lat, lng, source_timestamp, created_at)
  */
 router.get("/sharks", async (_req, res) => {
   try {
-    const url = "https://www.mapotic.com/api/v1/maps/3413/pois.geojson/?h=10";
+    // 1) Load all sharks
+    const { data: sharkRows, error: sharkErr } = await supabaseAdmin
+      .from("sharks")
+      .select("id, external_id, name, species, meta");
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error("Mapotic error:", response.status, await response.text());
+    if (sharkErr) {
+      console.error("Supabase sharks error:", sharkErr);
       return res
-        .status(502)
-        .json({ error: "Failed to fetch sharks from OCEARCH/Mapotic" });
+        .status(500)
+        .json({ error: sharkErr.message ?? "Failed to load sharks" });
     }
 
-    const data = (await response.json()) as {
-      type: string;
-      features: Array<{
-        geometry: { type: string; coordinates: [number, number] };
-        properties: any;
-      }>;
-    };
+    if (!sharkRows || sharkRows.length === 0) {
+      return res.json([]);
+    }
 
-    const sharks: Shark[] = data.features
-      // 1) keep only sharks
-      .filter((f) => {
-        const props = f.properties || {};
-        const catName = getProp(props.category_name, "en") as
-          | string
-          | undefined;
-        const species = props.species as string | undefined;
-        return (
-          catName === "Sharks" ||
-          (species && species.toLowerCase().includes("shark"))
-        );
-      })
-      // 2) map to our Shark type
-      .map((f) => {
-        const props = f.properties || {};
-        const [lon, lat] = f.geometry.coordinates;
+    // 2) Load all positions, newest first
+    const { data: posRows, error: posErr } = await supabaseAdmin
+      .from("shark_positions")
+      .select("shark_id, lat, lng, source_timestamp, created_at")
+      .order("created_at", { ascending: false });
 
-        const lastMove: string =
-          props.last_move_datetime ||
-          props.last_update ||
-          new Date().toISOString();
+    if (posErr) {
+      console.error("Supabase shark_positions error:", posErr);
+      return res
+        .status(500)
+        .json({ error: posErr.message ?? "Failed to load positions" });
+    }
+
+    // Build a map of latest position per shark_id
+    const latestPosByShark = new Map<number, any>();
+    if (posRows) {
+      for (const row of posRows as any[]) {
+        if (!latestPosByShark.has(row.shark_id)) {
+          // first row per shark_id is the latest because of order desc
+          latestPosByShark.set(row.shark_id, row);
+        }
+      }
+    }
+
+    // 3) Combine into API sharks
+    const sharks: Shark[] = (sharkRows as any[])
+      .map((row) => {
+        const latest = latestPosByShark.get(row.id);
+        if (!latest) {
+          // No position yet; skip this shark (or return with dummy coords if you prefer)
+          return null;
+        }
+
+        const meta = row.meta || {};
+
+        const lastMoveTimestamp =
+          latest.source_timestamp ?? latest.created_at ?? new Date().toISOString();
 
         const shark: Shark = {
-          // NOTE: this is the external (Mapotic) id
-          id: Number(props.id),
-          name: props.name ?? "Unnamed shark",
-          species: props.species ?? "Unknown shark",
-          gender: props.gender ?? undefined,
-          stageOfLife: props.stage_of_life ?? undefined,
-          length: props.length ?? undefined,
-          weight: props.weight ?? undefined,
-          lastMove,
-          zPing: Boolean(props.zping),
-          zPingTime: props.zping_datetime ?? undefined,
-          latitude: Number(lat),
-          longitude: Number(lon),
-          imageUrl: props.image ?? undefined,
+          // Expose external_id as "id" to keep compatibility with frontend
+          id: Number(row.external_id),
+          name: row.name ?? "Unnamed shark",
+          species: row.species ?? "Unknown shark",
+          gender: meta.gender ?? undefined,
+          stageOfLife: meta.stage_of_life ?? undefined,
+          length: meta.length ?? undefined,
+          weight: meta.weight ?? undefined,
+          lastMove: new Date(lastMoveTimestamp).toISOString(),
+          // zPing/zPingTime could also be stored in meta later if you want
+          latitude: Number(latest.lat),
+          longitude: Number(latest.lng),
+          imageUrl: meta.image ?? undefined,
         };
 
         return shark;
-      });
+      })
+      .filter((s): s is Shark => s !== null);
 
-    res.json(sharks);
+    return res.json(sharks);
   } catch (error) {
-    console.error("Error in /api/sharks:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Error in /api/sharks (db-based):", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
