@@ -255,6 +255,24 @@ export default function SharkMap() {
 
         {!loading && !error && selectedShark && (
           <>
+            {/* 📷 Image for selected shark */}
+            {selectedShark.imageUrl && (
+              <div className="stat-card">
+                <div className="stat-label">Photo</div>
+                <img
+                  src={selectedShark.imageUrl}
+                  alt={selectedShark.name}
+                  style={{
+                    width: "100%",
+                    maxHeight: "220px",
+                    objectFit: "cover",
+                    borderRadius: "12px",
+                    marginTop: "0.35rem",
+                  }}
+                />
+              </div>
+            )}
+
             <div className="stat-card">
               <div className="stat-label">Name</div>
               <div className="stat-value">{selectedShark.name}</div>
@@ -474,6 +492,21 @@ export default function SharkMap() {
                   <Popup>
                     <strong>{s.name}</strong>
                     <br />
+                    {s.imageUrl && (
+                      <>
+                        <img
+                          src={s.imageUrl}
+                          alt={s.name}
+                          style={{
+                            width: "100%",
+                            maxHeight: "150px",
+                            objectFit: "cover",
+                            borderRadius: "8px",
+                            margin: "0.25rem 0",
+                          }}
+                        />
+                      </>
+                    )}
                     {s.species || "Unknown species"}
                     <br />
                     {lastTime ? (

@@ -26,15 +26,15 @@ const router = express.Router();
  *
  * Now served from Supabase instead of the external API.
  * Uses:
- *   sharks(external_id, name, species, meta)
+ *   sharks(id, external_id, name, species, meta, image_url)
  *   shark_positions(shark_id, lat, lng, source_timestamp, created_at)
  */
 router.get("/sharks", async (_req, res) => {
   try {
-    // 1) Load all sharks
+    // 1) Load all sharks (now also selecting image_url)
     const { data: sharkRows, error: sharkErr } = await supabaseAdmin
       .from("sharks")
-      .select("id, external_id, name, species, meta");
+      .select("id, external_id, name, species, meta, image_url");
 
     if (sharkErr) {
       console.error("Supabase sharks error:", sharkErr);
@@ -85,6 +85,10 @@ router.get("/sharks", async (_req, res) => {
         const lastMoveTimestamp =
           latest.source_timestamp ?? latest.created_at ?? new Date().toISOString();
 
+        // Prefer DB column image_url, fall back to meta.image
+        const imageUrlFromDb: string | undefined = row.image_url ?? undefined;
+        const imageFromMeta: string | undefined = meta.image ?? undefined;
+
         const shark: Shark = {
           // Expose external_id as "id" to keep compatibility with frontend
           id: Number(row.external_id),
@@ -98,7 +102,7 @@ router.get("/sharks", async (_req, res) => {
           // zPing/zPingTime could also be stored in meta later if you want
           latitude: Number(latest.lat),
           longitude: Number(latest.lng),
-          imageUrl: meta.image ?? undefined,
+          imageUrl: imageUrlFromDb ?? imageFromMeta ?? undefined,
         };
 
         return shark;
