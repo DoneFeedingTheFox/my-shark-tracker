@@ -7,6 +7,25 @@
   height: 100%;
 }
 
+.timeline-bar {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.timeline-info {
+  font-size: 0.85rem;
+}
+
+.timeline-slider {
+  width: 100%;
+}
+
+
 /* Sidebar */
 
 .shark-sidebar {
@@ -188,3 +207,10 @@
   background: rgba(255, 255, 255, 0.95);
   border: 2px solid #00bcd4;
 }
+
+/* Blur SST tiles slightly so they look softer */
+.sst-layer img {
+  filter: blur(3px);
+  opacity: 0.9;
+}
+
