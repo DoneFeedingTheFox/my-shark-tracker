@@ -1,10 +1,15 @@
-// backend/src/sharks.ts
 import express from "express";
 // import fetch from "node-fetch"; // no longer needed
 import { supabaseAdmin } from "./lib/supabaseAdmin";
 
+export interface SharkTrackPoint {
+  lat: number;
+  lng: number;
+  time: string; // ISO string
+}
+
 export interface Shark {
-  id: number;
+  id: number; // external_id exposed to frontend
   name: string;
   species: string;
   gender?: string;
@@ -17,6 +22,9 @@ export interface Shark {
   latitude: number;
   longitude: number;
   imageUrl?: string;
+
+  // NEW: full path history we return to the frontend
+  track?: SharkTrackPoint[];
 }
 
 const router = express.Router();
@@ -47,11 +55,20 @@ router.get("/sharks", async (_req, res) => {
       return res.json([]);
     }
 
-    // 2) Load all positions, newest first
+    // Optional: limit how far back tracks go (in days)
+    const TRACK_DAYS = 7;
+    const cutoffIso = new Date(
+      Date.now() - TRACK_DAYS * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    // 2) Load positions (for all sharks), newest first
     const { data: posRows, error: posErr } = await supabaseAdmin
       .from("shark_positions")
       .select("shark_id, lat, lng, source_timestamp, created_at")
+      // use created_at for the cutoff, like your /track endpoint
+      .gte("created_at", cutoffIso)
       .order("created_at", { ascending: false });
+
 
     if (posErr) {
       console.error("Supabase shark_positions error:", posErr);
@@ -62,19 +79,50 @@ router.get("/sharks", async (_req, res) => {
 
     // Build a map of latest position per shark_id
     const latestPosByShark = new Map<number, any>();
+
+    // Build a map of full track per shark_id
+    const trackByShark = new Map<number, SharkTrackPoint[]>();
+
     if (posRows) {
       for (const row of posRows as any[]) {
-        if (!latestPosByShark.has(row.shark_id)) {
-          // first row per shark_id is the latest because of order desc
-          latestPosByShark.set(row.shark_id, row);
+        const sharkId: number = row.shark_id;
+
+        // latest position – first row we see for each shark (because of DESC order)
+        if (!latestPosByShark.has(sharkId)) {
+          latestPosByShark.set(sharkId, row);
         }
+
+        // full track – collect all points (we'll sort oldest->newest later)
+        const time =
+          row.source_timestamp ?? row.created_at ?? new Date().toISOString();
+
+        const point: SharkTrackPoint = {
+          lat: Number(row.lat),
+          lng: Number(row.lng),
+          time: new Date(time).toISOString(),
+        };
+
+        if (!trackByShark.has(sharkId)) {
+          trackByShark.set(sharkId, []);
+        }
+        trackByShark.get(sharkId)!.push(point);
       }
+    }
+
+    // ensure each track is in chronological order (oldest -> newest)
+    for (const [key, points] of trackByShark.entries()) {
+      points.sort(
+        (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+      );
+      trackByShark.set(key, points);
     }
 
     // 3) Combine into API sharks
     const sharks: Shark[] = (sharkRows as any[])
       .map((row) => {
-        const latest = latestPosByShark.get(row.id);
+        const internalId: number = row.id; // PK in sharks table
+        const latest = latestPosByShark.get(internalId);
+
         if (!latest) {
           // No position yet; skip this shark (or return with dummy coords if you prefer)
           return null;
@@ -103,6 +151,8 @@ router.get("/sharks", async (_req, res) => {
           latitude: Number(latest.lat),
           longitude: Number(latest.lng),
           imageUrl: imageUrlFromDb ?? imageFromMeta ?? undefined,
+          // NEW: attach full track, keyed by internal shark.id
+          track: trackByShark.get(internalId) ?? [],
         };
 
         return shark;

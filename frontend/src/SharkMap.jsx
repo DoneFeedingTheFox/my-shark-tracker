@@ -1,5 +1,5 @@
 ﻿// src/SharkMap.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -9,6 +9,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet-arrowheads";
 import "./SharkMap.css"; // styling
 
 // Fix default marker icon paths (Vite + Leaflet quirk)
@@ -26,6 +27,7 @@ L.Marker.prototype.options.icon = defaultIcon;
 
 const DEFAULT_MONTHS_BACK = 6;
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function isSharkWithinMonths(shark, months) {
   const timestamp =
@@ -64,12 +66,12 @@ export default function SharkMap() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // NEW: track + playback state
-  const [selectedTrack, setSelectedTrack] = useState([]);
-  const [trackLoading, setTrackLoading] = useState(false);
-  const [trackError, setTrackError] = useState(null);
+  // playback state (track now comes from selectedShark.track)
   const [playbackIndex, setPlaybackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // ref to the full track polyline (for arrowheads)
+  const fullTrackRef = useRef(null);
 
   // Remote sharks from your backend
   useEffect(() => {
@@ -78,9 +80,8 @@ export default function SharkMap() {
         setLoading(true);
         setError(null);
 
-        const resp = await fetch(
-          "https://shark-backend-yz6s.onrender.com/api/sharks"
-        );
+        // Local backend while developing; swap to Render URL for prod
+        const resp = await fetch("https://shark-backend-yz6s.onrender.com");
         if (!resp.ok) {
           throw new Error(`Shark API error: ${resp.status} ${resp.statusText}`);
         }
@@ -116,56 +117,18 @@ export default function SharkMap() {
     activeRemote.find((s) => s.id === selectedSharkId) ||
     (activeRemote.length > 0 ? activeRemote[0] : null);
 
-  // Fetch track from backend whenever selected shark changes
+  // FULL track for selected shark (all history from backend)
+  const selectedTrack = selectedShark?.track || [];
+
+  // Reset playback whenever shark/track changes
   useEffect(() => {
-    async function fetchTrack() {
-      if (!selectedShark) {
-        setSelectedTrack([]);
-        setTrackLoading(false);
-        setTrackError(null);
-        setIsPlaying(false);
-        setPlaybackIndex(0);
-        return;
-      }
-
-      try {
-        setTrackLoading(true);
-        setTrackError(null);
-        setIsPlaying(false);
-        setPlaybackIndex(0);
-
-        const resp = await fetch(
-          `https://shark-backend-yz6s.onrender.com/api/sharks/${selectedShark.id}/track?hours=24`
-        );
-        if (!resp.ok) {
-          throw new Error(
-            `Track API error: ${resp.status} ${resp.statusText}`
-          );
-        }
-
-        const data = await resp.json();
-
-        // Make sure we have an array of { latitude, longitude, timestamp }
-        const cleaned = Array.isArray(data) ? data : [];
-        cleaned.sort((a, b) => {
-          const ta = new Date(a.timestamp || 0).getTime();
-          const tb = new Date(b.timestamp || 0).getTime();
-          return ta - tb;
-        });
-
-        setSelectedTrack(cleaned);
-        setPlaybackIndex(cleaned.length > 0 ? cleaned.length - 1 : 0);
-      } catch (err) {
-        console.error("Failed to fetch shark track:", err);
-        setTrackError(err.message || "Unknown track error");
-        setSelectedTrack([]);
-      } finally {
-        setTrackLoading(false);
-      }
+    setIsPlaying(false);
+    if (selectedTrack.length > 0) {
+      setPlaybackIndex(selectedTrack.length - 1);
+    } else {
+      setPlaybackIndex(0);
     }
-
-    fetchTrack();
-  }, [selectedShark?.id]);
+  }, [selectedShark?.id, selectedTrack.length]);
 
   // Auto-play effect
   useEffect(() => {
@@ -184,7 +147,7 @@ export default function SharkMap() {
     }, 300); // ms between steps
 
     return () => clearInterval(interval);
-  }, [isPlaying, selectedTrack]);
+  }, [isPlaying, selectedTrack, selectedTrack.length]);
 
   const playbackSafeIndex =
     selectedTrack && selectedTrack.length
@@ -195,6 +158,26 @@ export default function SharkMap() {
     selectedTrack && selectedTrack.length
       ? selectedTrack[playbackSafeIndex]
       : null;
+
+  // Add arrowheads to the full selected-shark track whenever the track changes
+  useEffect(() => {
+    if (!fullTrackRef.current || !selectedTrack || selectedTrack.length < 2)
+      return;
+
+    const polyline = fullTrackRef.current;
+
+    // keep line visually clear
+    polyline.setStyle({ color: "#00bcd4", weight: 3, opacity: 0.9 });
+
+    // add arrowheads for direction (plugin patches the prototype)
+    if (typeof polyline.arrowheads === "function") {
+      polyline.arrowheads({
+        size: "10px",
+        frequency: "40px",
+        fill: true,
+      });
+    }
+  }, [selectedTrack, selectedShark?.id]);
 
   // Map center: follow selected shark if any, else first active, else [0,0]
   const center = selectedShark
@@ -310,88 +293,65 @@ export default function SharkMap() {
             <div className="stat-card">
               <div className="stat-label">Playback</div>
 
-              {trackLoading && (
+              {selectedTrack.length === 0 && (
                 <p className="muted" style={{ marginTop: "0.35rem" }}>
-                  Loading track…
+                  No historical data available for this shark.
                 </p>
               )}
 
-              {!trackLoading && trackError && (
-                <p
-                  className="muted"
-                  style={{ marginTop: "0.35rem", color: "#f97373" }}
-                >
-                  Could not load track: {trackError}
-                </p>
-              )}
-
-              {!trackLoading &&
-                !trackError &&
-                selectedTrack.length === 0 && (
-                  <p className="muted" style={{ marginTop: "0.35rem" }}>
-                    No historical data available for this shark.
-                  </p>
-                )}
-
-              {!trackLoading &&
-                !trackError &&
-                selectedTrack.length > 1 && (
-                  <>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.75rem",
-                        marginTop: "0.35rem",
+              {selectedTrack.length > 1 && (
+                <>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      marginTop: "0.35rem",
+                    }}
+                  >
+                    <button onClick={() => setIsPlaying((prev) => !prev)}>
+                      {isPlaying ? "Pause" : "Play"}
+                    </button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={selectedTrack.length - 1}
+                      value={playbackSafeIndex}
+                      onChange={(e) => {
+                        setPlaybackIndex(Number(e.target.value));
+                        setIsPlaying(false); // dragging pauses playback
                       }}
-                    >
-                      <button onClick={() => setIsPlaying((prev) => !prev)}>
-                        {isPlaying ? "Pause" : "Play"}
-                      </button>
-                      <input
-                        type="range"
-                        min={0}
-                        max={selectedTrack.length - 1}
-                        value={playbackSafeIndex}
-                        onChange={(e) => {
-                          setPlaybackIndex(Number(e.target.value));
-                          setIsPlaying(false); // dragging pauses playback
-                        }}
-                        style={{ flex: 1 }}
-                      />
-                    </div>
+                      style={{ flex: 1 }}
+                    />
+                  </div>
 
-                    <div
-                      className="muted"
-                      style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}
-                    >
-                      {selectedTrack[0]?.timestamp &&
-                        selectedTrack[selectedTrack.length - 1]?.timestamp && (
-                          <>
-                            {new Date(
-                              selectedTrack[0].timestamp
-                            ).toLocaleString()}{" "}
-                            →{" "}
-                            {new Date(
-                              selectedTrack[
-                                selectedTrack.length - 1
-                              ].timestamp
-                            ).toLocaleString()}
-                            <br />
-                          </>
-                        )}
-
-                      {currentPlaybackPoint?.timestamp && (
+                  <div
+                    className="muted"
+                    style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}
+                  >
+                    {selectedTrack[0]?.time &&
+                      selectedTrack[selectedTrack.length - 1]?.time && (
                         <>
-                          Current:{" "}
                           {new Date(
-                            currentPlaybackPoint.timestamp
+                            selectedTrack[0].time
+                          ).toLocaleString()}{" "}
+                          →{" "}
+                          {new Date(
+                            selectedTrack[selectedTrack.length - 1].time
                           ).toLocaleString()}
+                          <br />
                         </>
                       )}
-                    </div>
-                  </>
-                )}
+
+                    {currentPlaybackPoint?.time && (
+                      <>
+                        Current:{" "}
+                        {new Date(currentPlaybackPoint.time).toLocaleString()}
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             <p className="muted" style={{ marginTop: "0.5rem" }}>
@@ -432,40 +392,95 @@ export default function SharkMap() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {/* Track + playback marker for selected shark */}
+            {/* Background: 7-day tracks for ALL sharks */}
+            {activeRemote.map((s) => {
+              const fullTrack = s.track || [];
+              if (!fullTrack.length) return null;
+
+              const cutoff = now.getTime() - WEEK_MS;
+              const recentTrack = fullTrack.filter((p) => {
+                if (!p.time) return false;
+                const t = new Date(p.time).getTime();
+                return !isNaN(t) && t >= cutoff;
+              });
+
+              // Skip if not enough points, or if this is the selected shark
+              if (
+                !recentTrack ||
+                recentTrack.length < 2 ||
+                (selectedShark && s.id === selectedShark.id)
+              ) {
+                return null;
+              }
+
+              return (
+                <Polyline
+                  key={`bg-track-${s.id}`}
+                  positions={recentTrack.map((p) => [p.lat, p.lng])}
+                  pathOptions={{
+                    color: "#00bcd4",
+                    weight: 2,
+                    opacity: 0.35,
+                  }}
+                />
+              );
+            })}
+
+            {/* Track + playback marker for SELECTED shark (full history) */}
             {selectedTrack && selectedTrack.length > 0 && (
               <>
-                {/* Full track */}
+                {/* Full track polyline (with arrows) */}
                 <Polyline
-                  positions={selectedTrack.map((p) => [
-                    p.latitude,
-                    p.longitude,
-                  ])}
+                  ref={fullTrackRef}
+                  positions={selectedTrack.map((p) => [p.lat, p.lng])}
+                  pathOptions={{ color: "#00bcd4", weight: 3, opacity: 0.9 }}
                 />
 
-                {/* Played-so-far track */}
+                {/* Played-so-far track (slightly different style) */}
                 {selectedTrack.length > 1 && (
                   <Polyline
                     positions={selectedTrack
                       .slice(0, playbackSafeIndex + 1)
-                      .map((p) => [p.latitude, p.longitude])}
+                      .map((p) => [p.lat, p.lng])}
+                    pathOptions={{ color: "#ffffff", weight: 4, opacity: 0.35 }}
                   />
                 )}
 
-                {/* Moving playback marker */}
-                {currentPlaybackPoint && (
+                {/* Small dated points along the full path */}
+                {selectedTrack.map((p, i) => (
                   <Marker
-                    position={[
-                      currentPlaybackPoint.latitude,
-                      currentPlaybackPoint.longitude,
-                    ]}
+                    key={`track-point-${i}`}
+                    position={[p.lat, p.lng]}
+                    icon={L.divIcon({
+                      className: "track-point-icon",
+                      html: '<div class="track-point-dot"></div>',
+                    })}
                   >
                     <Popup>
                       <strong>{selectedShark?.name}</strong>
                       <br />
-                      {currentPlaybackPoint.timestamp
+                      {p.time
+                        ? new Date(p.time).toLocaleString()
+                        : "Unknown time"}
+                    </Popup>
+                  </Marker>
+                ))}
+
+                {/* Moving playback marker – small dot so it doesn't hide the line */}
+                {currentPlaybackPoint && (
+                  <Marker
+                    position={[currentPlaybackPoint.lat, currentPlaybackPoint.lng]}
+                    icon={L.divIcon({
+                      className: "playback-point-icon",
+                      html: '<div class="playback-point-dot"></div>',
+                    })}
+                  >
+                    <Popup>
+                      <strong>{selectedShark?.name}</strong>
+                      <br />
+                      {currentPlaybackPoint.time
                         ? new Date(
-                            currentPlaybackPoint.timestamp
+                            currentPlaybackPoint.time
                           ).toLocaleString()
                         : "Playback point"}
                     </Popup>
