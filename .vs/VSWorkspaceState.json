@@ -4,7 +4,7 @@
     "\\.github",
     "\\.github\\workflows",
     "\\backend",
-    "\\backend\\dist",
+    "\\backend\\scripts",
     "\\backend\\src",
     "\\frontend",
     "\\frontend\\public",
@@ -12,6 +12,6 @@
     "\\frontend\\src",
     "\\frontend\\src\\assets"
   ],
-  "SelectedNode": "\\frontend\\.gitignore",
+  "SelectedNode": "\\backend\\src\\sharks.ts",
   "PreviewInSolutionExplorer": false
 }

@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 // import fetch from "node-fetch"; // no longer needed
 import { supabaseAdmin } from "./lib/supabaseAdmin";
 
@@ -23,7 +23,7 @@ export interface Shark {
   longitude: number;
   imageUrl?: string;
 
-  // NEW: full path history we return to the frontend
+  // full path history we return to the frontend
   track?: SharkTrackPoint[];
 }
 
@@ -69,7 +69,6 @@ router.get("/sharks", async (_req, res) => {
       .gte("created_at", cutoffIso)
       .order("created_at", { ascending: false });
 
-
     if (posErr) {
       console.error("Supabase shark_positions error:", posErr);
       return res
@@ -87,12 +86,12 @@ router.get("/sharks", async (_req, res) => {
       for (const row of posRows as any[]) {
         const sharkId: number = row.shark_id;
 
-        // latest position � first row we see for each shark (because of DESC order)
+        // latest position – first row we see for each shark (because of DESC order)
         if (!latestPosByShark.has(sharkId)) {
           latestPosByShark.set(sharkId, row);
         }
 
-        // full track � collect all points (we'll sort oldest->newest later)
+        // full track – collect all points (we'll sort oldest->newest later)
         const time =
           row.source_timestamp ?? row.created_at ?? new Date().toISOString();
 
@@ -133,9 +132,8 @@ router.get("/sharks", async (_req, res) => {
         const lastMoveTimestamp =
           latest.source_timestamp ?? latest.created_at ?? new Date().toISOString();
 
-        // Prefer DB column image_url, fall back to meta.image
+        // ✅ Only use cached image_url from our own storage
         const imageUrlFromDb: string | undefined = row.image_url ?? undefined;
-        const imageFromMeta: string | undefined = meta.image ?? undefined;
 
         const shark: Shark = {
           // Expose external_id as "id" to keep compatibility with frontend
@@ -150,8 +148,8 @@ router.get("/sharks", async (_req, res) => {
           // zPing/zPingTime could also be stored in meta later if you want
           latitude: Number(latest.lat),
           longitude: Number(latest.lng),
-          imageUrl: imageUrlFromDb ?? imageFromMeta ?? undefined,
-          // NEW: attach full track, keyed by internal shark.id
+          imageUrl: imageUrlFromDb,
+          // full track, keyed by internal shark.id
           track: trackByShark.get(internalId) ?? [],
         };
 
