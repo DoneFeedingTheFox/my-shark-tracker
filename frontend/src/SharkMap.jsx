@@ -79,9 +79,9 @@ export default function SharkMap() {
       try {
         setLoading(true);
         setError(null);
-
-        // Local backend while developing; swap to Render URL for prod
-        const resp = await fetch("https://shark-backend-yz6s.onrender.com");
+        const resp = await fetch(
+         "https://shark-backend-yz6s.onrender.com/api/sharks"
+      );
         if (!resp.ok) {
           throw new Error(`Shark API error: ${resp.status} ${resp.statusText}`);
         }
