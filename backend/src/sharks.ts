@@ -1,6 +1,8 @@
-﻿import express from "express";
+﻿// backend/src/sharks.ts
+import express from "express";
 // import fetch from "node-fetch"; // no longer needed
 import { supabaseAdmin } from "./lib/supabaseAdmin";
+import { fetchSeaSurfaceTemperature } from "./lib/sstClient";
 
 export interface SharkTrackPoint {
   lat: number;
@@ -25,9 +27,38 @@ export interface Shark {
 
   // full path history we return to the frontend
   track?: SharkTrackPoint[];
+
+  // approximate sea surface temperature at current position (°C)
+  approxSst?: number | null;
 }
 
 const router = express.Router();
+
+/**
+ * Helper: add approximate SST to each shark sequentially
+ * to avoid hammering the Open-Meteo API with parallel calls.
+ */
+async function addApproxSstToSharks(sharks: Shark[]): Promise<Shark[]> {
+  const result: Shark[] = [];
+
+  for (const shark of sharks) {
+    try {
+      const sst = await fetchSeaSurfaceTemperature(
+        shark.latitude,
+        shark.longitude
+      );
+      result.push({ ...shark, approxSst: sst ?? null });
+    } catch (e) {
+      console.warn(
+        `[SST] Failed for shark ${shark.id} (${shark.name}):`,
+        e
+      );
+      result.push({ ...shark, approxSst: null });
+    }
+  }
+
+  return result;
+}
 
 /**
  * GET /api/sharks
@@ -116,7 +147,7 @@ router.get("/sharks", async (_req, res) => {
       trackByShark.set(key, points);
     }
 
-    // 3) Combine into API sharks
+    // 3) Combine into API sharks (without SST yet)
     const sharks: Shark[] = (sharkRows as any[])
       .map((row) => {
         const internalId: number = row.id; // PK in sharks table
@@ -130,9 +161,11 @@ router.get("/sharks", async (_req, res) => {
         const meta = row.meta || {};
 
         const lastMoveTimestamp =
-          latest.source_timestamp ?? latest.created_at ?? new Date().toISOString();
+          latest.source_timestamp ??
+          latest.created_at ??
+          new Date().toISOString();
 
-        // ✅ Only use cached image_url from our own storage
+        // Only use cached image_url from our own storage
         const imageUrlFromDb: string | undefined = row.image_url ?? undefined;
 
         const shark: Shark = {
@@ -151,13 +184,17 @@ router.get("/sharks", async (_req, res) => {
           imageUrl: imageUrlFromDb,
           // full track, keyed by internal shark.id
           track: trackByShark.get(internalId) ?? [],
+          // approxSst will be added below
         };
 
         return shark;
       })
       .filter((s): s is Shark => s !== null);
 
-    return res.json(sharks);
+    // 4) Add approximate SST (°C) using cached helper, sequentially to avoid 429
+    const sharksWithSst = await addApproxSstToSharks(sharks);
+
+    return res.json(sharksWithSst);
   } catch (error) {
     console.error("Error in /api/sharks (db-based):", error);
     return res.status(500).json({ error: "Internal server error" });

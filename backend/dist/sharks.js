@@ -3,10 +3,30 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+// backend/src/sharks.ts
 const express_1 = __importDefault(require("express"));
 // import fetch from "node-fetch"; // no longer needed
 const supabaseAdmin_1 = require("./lib/supabaseAdmin");
+const sstClient_1 = require("./lib/sstClient");
 const router = express_1.default.Router();
+/**
+ * Helper: add approximate SST to each shark sequentially
+ * to avoid hammering the Open-Meteo API with parallel calls.
+ */
+async function addApproxSstToSharks(sharks) {
+    const result = [];
+    for (const shark of sharks) {
+        try {
+            const sst = await (0, sstClient_1.fetchSeaSurfaceTemperature)(shark.latitude, shark.longitude);
+            result.push({ ...shark, approxSst: sst ?? null });
+        }
+        catch (e) {
+            console.warn(`[SST] Failed for shark ${shark.id} (${shark.name}):`, e);
+            result.push({ ...shark, approxSst: null });
+        }
+    }
+    return result;
+}
 /**
  * GET /api/sharks
  *
@@ -53,11 +73,11 @@ router.get("/sharks", async (_req, res) => {
         if (posRows) {
             for (const row of posRows) {
                 const sharkId = row.shark_id;
-                // latest position � first row we see for each shark (because of DESC order)
+                // latest position – first row we see for each shark (because of DESC order)
                 if (!latestPosByShark.has(sharkId)) {
                     latestPosByShark.set(sharkId, row);
                 }
-                // full track � collect all points (we'll sort oldest->newest later)
+                // full track – collect all points (we'll sort oldest->newest later)
                 const time = row.source_timestamp ?? row.created_at ?? new Date().toISOString();
                 const point = {
                     lat: Number(row.lat),
@@ -75,7 +95,7 @@ router.get("/sharks", async (_req, res) => {
             points.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
             trackByShark.set(key, points);
         }
-        // 3) Combine into API sharks
+        // 3) Combine into API sharks (without SST yet)
         const sharks = sharkRows
             .map((row) => {
             const internalId = row.id; // PK in sharks table
@@ -85,10 +105,11 @@ router.get("/sharks", async (_req, res) => {
                 return null;
             }
             const meta = row.meta || {};
-            const lastMoveTimestamp = latest.source_timestamp ?? latest.created_at ?? new Date().toISOString();
-            // Prefer DB column image_url, fall back to meta.image
+            const lastMoveTimestamp = latest.source_timestamp ??
+                latest.created_at ??
+                new Date().toISOString();
+            // Only use cached image_url from our own storage
             const imageUrlFromDb = row.image_url ?? undefined;
-            const imageFromMeta = meta.image ?? undefined;
             const shark = {
                 // Expose external_id as "id" to keep compatibility with frontend
                 id: Number(row.external_id),
@@ -102,14 +123,17 @@ router.get("/sharks", async (_req, res) => {
                 // zPing/zPingTime could also be stored in meta later if you want
                 latitude: Number(latest.lat),
                 longitude: Number(latest.lng),
-                imageUrl: imageUrlFromDb ?? imageFromMeta ?? undefined,
-                // NEW: attach full track, keyed by internal shark.id
+                imageUrl: imageUrlFromDb,
+                // full track, keyed by internal shark.id
                 track: trackByShark.get(internalId) ?? [],
+                // approxSst will be added below
             };
             return shark;
         })
             .filter((s) => s !== null);
-        return res.json(sharks);
+        // 4) Add approximate SST (°C) using cached helper, sequentially to avoid 429
+        const sharksWithSst = await addApproxSstToSharks(sharks);
+        return res.json(sharksWithSst);
     }
     catch (error) {
         console.error("Error in /api/sharks (db-based):", error);
