@@ -1,12 +1,54 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\Users\\Morten Byom\\source\\repos\\my-shark-tracker\\",
-  "Documents": [],
+  "WorkspaceRootPath": "C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\frontend\\src\\SharkMap.jsx||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:frontend\\src\\SharkMap.jsx||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\frontend\\src\\SharkMap.css||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:frontend\\src\\SharkMap.css||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    }
+  ],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
       "VerticalTabListWidth": 256,
-      "DocumentGroups": []
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "SharkMap.css",
+              "DocumentMoniker": "C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\frontend\\src\\SharkMap.css",
+              "RelativeDocumentMoniker": "frontend\\src\\SharkMap.css",
+              "ToolTip": "C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\frontend\\src\\SharkMap.css",
+              "RelativeToolTip": "frontend\\src\\SharkMap.css",
+              "ViewState": "AgIAANcAAAAAAAAAAAAAAPYAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003000|",
+              "WhenOpened": "2025-11-19T11:43:35.434Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "SharkMap.jsx",
+              "DocumentMoniker": "C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\frontend\\src\\SharkMap.jsx",
+              "RelativeDocumentMoniker": "frontend\\src\\SharkMap.jsx",
+              "ToolTip": "C:\\Users\\xj03\\source\\repos\\my-shark-tracker\\frontend\\src\\SharkMap.jsx",
+              "RelativeToolTip": "frontend\\src\\SharkMap.jsx",
+              "ViewState": "AgIAAIwDAAAAAAAAAAAAALEDAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003663|",
+              "WhenOpened": "2025-11-19T11:03:01.089Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
     }
   ]
 }

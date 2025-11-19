@@ -110,6 +110,9 @@ export default function SharkMap() {
   // ref to the full track polyline (for arrowheads)
   const fullTrackRef = useRef(null);
 
+  // map ref so we can invalidate size and keep tiles correct
+  const mapRef = useRef(null);
+
   // 🌊 Environment layer toggles
   const [showSst, setShowSst] = useState(true);
   const [showBathymetry, setShowBathymetry] = useState(true);
@@ -119,6 +122,10 @@ export default function SharkMap() {
 
   // Debounced timeline just for SST tiles (to avoid reloading on every tiny move)
   const [sstTimelineTime, setSstTimelineTime] = useState(null);
+
+  // New UI state: slide-in drawers
+  const [showExplorer, setShowExplorer] = useState(true);
+  const [showDetails, setShowDetails] = useState(true);
 
   // Remote sharks from your backend
   useEffect(() => {
@@ -168,15 +175,14 @@ export default function SharkMap() {
   const selectedTrack = selectedShark?.track || [];
 
   // Reset playback whenever shark/track changes
-    useEffect(() => {
-      // stop playback when shark changes
-      setIsPlaying(false);
-      // always start from the beginning of the track
-      setPlaybackIndex(0);
-    }, [selectedShark?.id, selectedTrack.length]);
+  useEffect(() => {
+    // stop playback when shark changes
+    setIsPlaying(false);
+    // always start from the beginning of the track
+    setPlaybackIndex(0);
+  }, [selectedShark?.id, selectedTrack.length]);
 
-
-  // Auto-play effect (per-shark playback, unchanged)
+  // Auto-play effect (per-shark playback)
   useEffect(() => {
     if (!isPlaying || !selectedTrack || selectedTrack.length <= 1) return;
 
@@ -365,11 +371,268 @@ export default function SharkMap() {
     return [0, 0];
   })();
 
+  // keep the map view in sync when center changes
+  useEffect(() => {
+    if (mapRef.current && Array.isArray(center)) {
+      mapRef.current.setView(center);
+    }
+  }, [center]);
+
+  // invalidate size on window resize so Leaflet recalculates tiles
+  useEffect(() => {
+    const handleResize = () => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   return (
-    <div className="shark-layout">
-      {/* Sidebar */}
-      <aside className="shark-sidebar">
+    <div className="shark-page">
+      {/* Fullscreen map background */}
+      <div className="shark-map-shell">
+        <MapContainer
+          center={center}
+          zoom={4}
+          className="shark-map"
+          scrollWheelZoom={true}
+          whenCreated={(map) => {
+            mapRef.current = map;
+            setTimeout(() => {
+              map.invalidateSize();
+            }, 0);
+          }}
+        >
+          {/* Base OSM layer */}
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          {/* 🌊 Bathymetry overlay */}
+          {showBathymetry && (
+            <TileLayer
+              url={BATHYMETRY_TILE_URL}
+              attribution="Bathymetry &copy; Esri & contributors"
+              opacity={0.7}
+            />
+          )}
+
+          {/* 🌡 SST overlay */}
+          {showSst && (
+            <TileLayer
+              url={sstTileUrl}
+              attribution="SST imagery &copy; NASA GIBS"
+              opacity={0.35}
+              className="sst-layer"
+            />
+          )}
+
+          {/* Background: 7-day tracks for ALL sharks (still based on "now") */}
+          {activeRemote.map((s) => {
+            const fullTrack = s.track || [];
+            if (!fullTrack.length) return null;
+
+            const cutoff = now.getTime() - WEEK_MS;
+            const recentTrack = fullTrack.filter((p) => {
+              if (!p.time) return false;
+              const t = new Date(p.time).getTime();
+              return !isNaN(t) && t >= cutoff;
+            });
+
+            // Skip if not enough points, or if this is the selected shark
+            if (
+              !recentTrack ||
+              recentTrack.length < 2 ||
+              (selectedShark && s.id === selectedShark.id)
+            ) {
+              return null;
+            }
+
+            return (
+              <Polyline
+                key={`bg-track-${s.id}`}
+                positions={recentTrack.map((p) => [p.lat, p.lng])}
+                pathOptions={{
+                  color: "#00bcd4",
+                  weight: 2,
+                  opacity: 0.35,
+                }}
+              />
+            );
+          })}
+
+          {/* Track + playback marker for SELECTED shark (full history) */}
+          {selectedTrack && selectedTrack.length > 0 && (
+            <>
+              {/* Full track polyline (with arrows) */}
+              <Polyline
+                ref={fullTrackRef}
+                positions={selectedTrack.map((p) => [p.lat, p.lng])}
+                pathOptions={{ color: "#00bcd4", weight: 3, opacity: 0.9 }}
+              />
+
+              {/* Played-so-far track (slightly different style) */}
+              {selectedTrack.length > 1 && (
+                <Polyline
+                  positions={selectedTrack
+                    .slice(0, playbackSafeIndex + 1)
+                    .map((p) => [p.lat, p.lng])}
+                  pathOptions={{ color: "#ffffff", weight: 4, opacity: 0.35 }}
+                />
+              )}
+
+              {/* Small dated points along the full path */}
+              {selectedTrack.map((p, i) => (
+                <Marker
+                  key={`track-point-${i}`}
+                  position={[p.lat, p.lng]}
+                  icon={L.divIcon({
+                    className: "track-point-icon",
+                    html: '<div class="track-point-dot"></div>',
+                  })}
+                >
+                  <Popup>
+                    <strong>{selectedShark?.name}</strong>
+                    <br />
+                    {p.time
+                      ? new Date(p.time).toLocaleString()
+                      : "Unknown time"}
+                  </Popup>
+                </Marker>
+              ))}
+
+              {/* Moving playback marker – small dot so it doesn't hide the line */}
+              {currentPlaybackPoint && (
+                <Marker
+                  position={[
+                    currentPlaybackPoint.lat,
+                    currentPlaybackPoint.lng,
+                  ]}
+                  icon={L.divIcon({
+                    className: "playback-point-icon",
+                    html: '<div class="playback-point-dot"></div>',
+                  })}
+                >
+                  <Popup>
+                    <strong>{selectedShark?.name}</strong>
+                    <br />
+                    {currentPlaybackPoint.time
+                      ? new Date(currentPlaybackPoint.time).toLocaleString()
+                      : "Playback point"}
+                  </Popup>
+                </Marker>
+              )}
+            </>
+          )}
+
+          {/* Remote sharks (position following global timeline) */}
+          {activeRemote.map((s) => {
+            const lastTime =
+              s.last_update || s.lastMove || s.last_move || null;
+
+            const pos = getPositionAtTime(s);
+            if (!pos) return null;
+
+            return (
+              <Marker
+                key={s.id}
+                position={[pos.lat, pos.lng]}
+                eventHandlers={{
+                  click(e) {
+                    // click selects shark in sidebar and ensures popup is open
+                    setSelectedSharkId(s.id);
+                    if (
+                      e &&
+                      e.target &&
+                      typeof e.target.openPopup === "function"
+                    ) {
+                      e.target.openPopup();
+                    }
+                  },
+                  mouseover(e) {
+                    // hover shows popup (does NOT change selected shark)
+                    if (
+                      e &&
+                      e.target &&
+                      typeof e.target.openPopup === "function"
+                    ) {
+                      e.target.openPopup();
+                    }
+                  },
+                  mouseout(e) {
+                    // leaving marker hides popup
+                    if (
+                      e &&
+                      e.target &&
+                      typeof e.target.closePopup === "function"
+                    ) {
+                      e.target.closePopup();
+                    }
+                  },
+                }}
+              >
+                <Popup>
+                  <strong>{s.name}</strong>
+                  <br />
+                  {s.imageUrl && (
+                    <img
+                      src={s.imageUrl}
+                      alt={s.name}
+                      style={{
+                        width: "100%",
+                        maxHeight: "150px",
+                        objectFit: "cover",
+                        borderRadius: "8px",
+                        margin: "0.25rem 0",
+                      }}
+                    />
+                  )}
+                  {s.species || "Unknown species"}
+                  <br />
+                  {lastTime ? (
+                    <>
+                      Last update: {new Date(lastTime).toLocaleString()}
+                      <br />
+                    </>
+                  ) : (
+                    <>
+                      Last update: Unknown
+                      <br />
+                    </>
+                  )}
+                  Lat: {pos.lat.toFixed(3)}, Lon: {pos.lng.toFixed(3)}
+                </Popup>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+      </div>
+
+      {/* Floating toggles */}
+      <button
+        className="drawer-toggle drawer-toggle-left"
+        onClick={() => setShowExplorer((v) => !v)}
+      >
+        ☰ Filters
+      </button>
+
+      <button
+        className="drawer-toggle drawer-toggle-right"
+        onClick={() => setShowDetails((v) => !v)}
+      >
+        🦈 Details
+      </button>
+
+      {/* LEFT: Shark Explorer drawer */}
+      <aside
+        className={`drawer drawer-left ${showExplorer ? "drawer-open" : ""}`}
+      >
         <h2 className="panel-title">Shark explorer</h2>
+
         {loading && (
           <p className="muted" style={{ marginBottom: "0.75rem" }}>
             Loading sharks from backend…
@@ -449,7 +712,8 @@ export default function SharkMap() {
             </label>
           </div>
         </div>
-                {/* SST legend / explanation – only show when SST layer is on */}
+
+        {/* SST legend / explanation – only show when SST layer is on */}
         {showSst && (
           <div className="stat-card">
             <div className="stat-label">Sea surface temperature legend</div>
@@ -499,9 +763,18 @@ export default function SharkMap() {
           </div>
         )}
 
-
         <div className="divider" />
 
+        <p className="muted">
+          Active in range: <strong>{activeRemote.length}</strong> / Total
+          fetched: <strong>{remoteSharks.length}</strong>
+        </p>
+      </aside>
+
+      {/* RIGHT: Selected shark drawer */}
+      <aside
+        className={`drawer drawer-right ${showDetails ? "drawer-open" : ""}`}
+      >
         <h3 className="panel-subtitle">Selected shark</h3>
 
         {!loading && !error && !selectedShark && (
@@ -634,264 +907,39 @@ export default function SharkMap() {
             </p>
           </>
         )}
-
-        <div className="divider" />
-
-        <p className="muted">
-          Active in range: <strong>{activeRemote.length}</strong> / Total
-          fetched: <strong>{remoteSharks.length}</strong>
-        </p>
       </aside>
 
-      {/* Map panel */}
-      <section className="shark-map-panel">
-        <div className="shark-map-header">
-          <div>
-            <h2 className="panel-title">Shark map</h2>
-            <p className="muted">
-              Current locations of tracked sharks from the backend. Click a
-              marker to see details in the sidebar.
-            </p>
-          </div>
+      {/* 🌍 Global timeline slider – floating at the bottom */}
+      <div className="timeline-bar timeline-floating">
+        <div className="timeline-info">
+          {currentTimelineTime ? (
+            <>
+              Timeline:{" "}
+              <strong>{currentTimelineTime.toLocaleString()}</strong>
+            </>
+          ) : (
+            <>
+              Timeline: <span className="muted">No track data</span>
+            </>
+          )}
         </div>
-
-        <div className="shark-map-container">
-          <MapContainer
-            center={center}
-            zoom={4}
-            className="shark-map"
-            scrollWheelZoom={true}
-          >
-            {/* Base OSM layer */}
-            <TileLayer
-              attribution="&copy; OpenStreetMap contributors"
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-
-            {/* 🌊 Bathymetry overlay */}
-            {showBathymetry && (
-              <TileLayer
-                url={BATHYMETRY_TILE_URL}
-                attribution="Bathymetry &copy; Esri & contributors"
-                opacity={0.7}
-              />
-            )}
-
-            {/* 🌡 SST overlay */}
-            {showSst && (
-              <TileLayer
-                url={sstTileUrl}
-                attribution="SST imagery &copy; NASA GIBS"
-                opacity={0.35}
-                className="sst-layer"
-              />
-            )}
-
-            {/* Background: 7-day tracks for ALL sharks (still based on "now") */}
-            {activeRemote.map((s) => {
-              const fullTrack = s.track || [];
-              if (!fullTrack.length) return null;
-
-              const cutoff = now.getTime() - WEEK_MS;
-              const recentTrack = fullTrack.filter((p) => {
-                if (!p.time) return false;
-                const t = new Date(p.time).getTime();
-                return !isNaN(t) && t >= cutoff;
-              });
-
-              // Skip if not enough points, or if this is the selected shark
-              if (
-                !recentTrack ||
-                recentTrack.length < 2 ||
-                (selectedShark && s.id === selectedShark.id)
-              ) {
-                return null;
-              }
-
-              return (
-                <Polyline
-                  key={`bg-track-${s.id}`}
-                  positions={recentTrack.map((p) => [p.lat, p.lng])}
-                  pathOptions={{
-                    color: "#00bcd4",
-                    weight: 2,
-                    opacity: 0.35,
-                  }}
-                />
-              );
-            })}
-
-            {/* Track + playback marker for SELECTED shark (full history) */}
-            {selectedTrack && selectedTrack.length > 0 && (
-              <>
-                {/* Full track polyline (with arrows) */}
-                <Polyline
-                  ref={fullTrackRef}
-                  positions={selectedTrack.map((p) => [p.lat, p.lng])}
-                  pathOptions={{ color: "#00bcd4", weight: 3, opacity: 0.9 }}
-                />
-
-                {/* Played-so-far track (slightly different style) */}
-                {selectedTrack.length > 1 && (
-                  <Polyline
-                    positions={selectedTrack
-                      .slice(0, playbackSafeIndex + 1)
-                      .map((p) => [p.lat, p.lng])}
-                    pathOptions={{ color: "#ffffff", weight: 4, opacity: 0.35 }}
-                  />
-                )}
-
-                {/* Small dated points along the full path */}
-                {selectedTrack.map((p, i) => (
-                  <Marker
-                    key={`track-point-${i}`}
-                    position={[p.lat, p.lng]}
-                    icon={L.divIcon({
-                      className: "track-point-icon",
-                      html: '<div class="track-point-dot"></div>',
-                    })}
-                  >
-                    <Popup>
-                      <strong>{selectedShark?.name}</strong>
-                      <br />
-                      {p.time
-                        ? new Date(p.time).toLocaleString()
-                        : "Unknown time"}
-                    </Popup>
-                  </Marker>
-                ))}
-
-                {/* Moving playback marker – small dot so it doesn't hide the line */}
-                {currentPlaybackPoint && (
-                  <Marker
-                    position={[
-                      currentPlaybackPoint.lat,
-                      currentPlaybackPoint.lng,
-                    ]}
-                    icon={L.divIcon({
-                      className: "playback-point-icon",
-                      html: '<div class="playback-point-dot"></div>',
-                    })}
-                  >
-                    <Popup>
-                      <strong>{selectedShark?.name}</strong>
-                      <br />
-                      {currentPlaybackPoint.time
-                        ? new Date(
-                            currentPlaybackPoint.time
-                          ).toLocaleString()
-                        : "Playback point"}
-                    </Popup>
-                  </Marker>
-                )}
-              </>
-            )}
-
-            {/* Remote sharks (position following global timeline) */}
-            {activeRemote.map((s) => {
-              const lastTime =
-                s.last_update || s.lastMove || s.last_move || null;
-
-              const pos = getPositionAtTime(s);
-              if (!pos) return null;
-
-              return (
-                <Marker
-                  key={s.id}
-                  position={[pos.lat, pos.lng]}
-                  eventHandlers={{
-                    click(e) {
-                      // click selects shark in sidebar and ensures popup is open
-                      setSelectedSharkId(s.id);
-                      if (e && e.target && typeof e.target.openPopup === "function") {
-                        e.target.openPopup();
-                      }
-                    },
-                    mouseover(e) {
-                      // hover shows popup (does NOT change selected shark)
-                      if (e && e.target && typeof e.target.openPopup === "function") {
-                        e.target.openPopup();
-                      }
-                    },
-                    mouseout(e) {
-                      // leaving marker hides popup
-                      if (e && e.target && typeof e.target.closePopup === "function") {
-                        e.target.closePopup();
-                      }
-                    },
-                  }}
-                >
-                  <Popup>
-                    <strong>{s.name}</strong>
-                    <br />
-                    {s.imageUrl && (
-                      <>
-                        <img
-                          src={s.imageUrl}
-                          alt={s.name}
-                          style={{
-                            width: "100%",
-                            maxHeight: "150px",
-                            objectFit: "cover",
-                            borderRadius: "8px",
-                            margin: "0.25rem 0",
-                          }}
-                        />
-                      </>
-                    )}
-                    {s.species || "Unknown species"}
-                    <br />
-                    {lastTime ? (
-                      <>
-                        Last update: {new Date(lastTime).toLocaleString()}
-                        <br />
-                      </>
-                    ) : (
-                      <>
-                        Last update: Unknown
-                        <br />
-                      </>
-                    )}
-                    Lat: {pos.lat.toFixed(3)}, Lon: {pos.lng.toFixed(3)}
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-        </div>
-
-        {/* 🌍 Global timeline slider at the bottom */}
-        <div className="timeline-bar">
-          <div className="timeline-info">
-            {currentTimelineTime ? (
-              <>
-                Timeline:{" "}
-                <strong>{currentTimelineTime.toLocaleString()}</strong>
-              </>
-            ) : (
-              <>
-                Timeline: <span className="muted">No track data</span>
-              </>
-            )}
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(allTimelineTimes.length - 1, 0)}
-            value={
-              allTimelineTimes.length > 0
-                ? Math.min(
-                    Math.max(timelineIndex, 0),
-                    allTimelineTimes.length - 1
-                  )
-                : 0
-            }
-            onChange={(e) => setTimelineIndex(Number(e.target.value))}
-            disabled={allTimelineTimes.length === 0}
-            className="timeline-slider"
-          />
-        </div>
-      </section>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(allTimelineTimes.length - 1, 0)}
+          value={
+            allTimelineTimes.length > 0
+              ? Math.min(
+                  Math.max(timelineIndex, 0),
+                  allTimelineTimes.length - 1
+                )
+              : 0
+          }
+          onChange={(e) => setTimelineIndex(Number(e.target.value))}
+          disabled={allTimelineTimes.length === 0}
+          className="timeline-slider"
+        />
+      </div>
     </div>
   );
 }
