@@ -1,6 +1,5 @@
 ﻿// backend/src/sharks.ts
 import express from "express";
-// import fetch from "node-fetch"; // no longer needed
 import { supabaseAdmin } from "./lib/supabaseAdmin";
 import { fetchSeaSurfaceTemperature } from "./lib/sstClient";
 
@@ -11,15 +10,14 @@ export interface SharkTrackPoint {
 }
 
 export interface Shark {
-  id: number; // external_id exposed to frontend
+  id: number; // numeric ID exposed to frontend (prefer external_id if numeric)
+  external_id?: string; // keep for reference/debugging
   name: string;
   species: string;
   latitude: number;
   longitude: number;
   imageUrl?: string | null;
   last_update?: string | null;
-  zPing?: boolean | null;
-  zPingTime?: string | null;
   approxSst?: number | null;
   track?: SharkTrackPoint[];
 }
@@ -36,12 +34,17 @@ async function addApproxSstToSharks(sharks: Shark[]): Promise<Shark[]> {
     try {
       const sst = await fetchSeaSurfaceTemperature(s.latitude, s.longitude);
       out.push({ ...s, approxSst: sst ?? null });
-    } catch (e) {
-      // If SST fails, keep shark data intact.
+    } catch {
       out.push({ ...s, approxSst: null });
     }
   }
   return out;
+}
+
+function safeIso(value: any): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 /**
@@ -50,7 +53,7 @@ async function addApproxSstToSharks(sharks: Shark[]): Promise<Shark[]> {
  * Returns sharks + full historical track data from Supabase.
  *
  * Tables:
- *  - sharks(id, external_id, name, species, image_url, last_update, ...)
+ *  - sharks(id, external_id(TEXT), name, species, image_url, updated_at, ...)
  *  - shark_positions(shark_id, lat, lng, source_timestamp, created_at)
  */
 router.get("/sharks", async (_req, res) => {
@@ -58,7 +61,7 @@ router.get("/sharks", async (_req, res) => {
     // 1) Load all sharks
     const { data: sharkRows, error: sharkError } = await supabaseAdmin
       .from("sharks")
-      .select("id, external_id, name, species, image_url, last_update, z_ping, z_ping_time")
+      .select("id, external_id, name, species, image_url, updated_at")
       .order("id", { ascending: true });
 
     if (sharkError) {
@@ -67,15 +70,11 @@ router.get("/sharks", async (_req, res) => {
     }
 
     const sharksDb = sharkRows ?? [];
-
-    if (sharksDb.length === 0) {
-      return res.json([]);
-    }
-
-    // Map internal shark.id -> external_id etc.
-    const internalIds = sharksDb.map((s) => s.id);
+    if (sharksDb.length === 0) return res.json([]);
 
     // 2) Load ALL positions for those sharks (NO TIME RESTRICTION)
+    const internalIds = sharksDb.map((s: any) => s.id);
+
     const { data: posRows, error: posError } = await supabaseAdmin
       .from("shark_positions")
       .select("shark_id, lat, lng, source_timestamp, created_at")
@@ -92,49 +91,52 @@ router.get("/sharks", async (_req, res) => {
     // 3) Group positions by internal shark_id -> track[]
     const trackByShark = new Map<number, SharkTrackPoint[]>();
 
-    for (const row of positions) {
+    for (const row of positions as any[]) {
       const sid = row.shark_id as number;
       const lat = Number(row.lat);
       const lng = Number(row.lng);
 
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-      const time = (row.source_timestamp ?? row.created_at) as string;
+      const time =
+        (row.source_timestamp ?? row.created_at) as string | undefined;
+
+      const isoTime = safeIso(time);
+      if (!isoTime) continue;
 
       const list = trackByShark.get(sid) ?? [];
-      list.push({ lat, lng, time });
+      list.push({ lat, lng, time: isoTime });
       trackByShark.set(sid, list);
     }
 
-    // Helper: get latest point for a shark track
     const getLatest = (track: SharkTrackPoint[]) =>
       track.length ? track[track.length - 1] : null;
 
-    // Build response objects keyed by external_id as `id`
-    const sharks: Shark[] = sharksDb
-      .map((row: any) => {
-        const internalId = row.id as number;
-        const externalId = row.external_id as number;
+    // 4) Build response
+    const sharks: Shark[] = (sharksDb as any[])
+      .map((row) => {
+        const internalId = Number(row.id);
+        const externalIdRaw = row.external_id as string | null | undefined;
+
+        // external_id is TEXT in your schema; convert if numeric
+        const externalIdNum =
+          externalIdRaw != null ? Number(externalIdRaw) : NaN;
 
         const track = trackByShark.get(internalId) ?? [];
         const latest = getLatest(track);
+        if (!latest) return null; // cannot place on map if no positions exist
 
-        // If no positions exist at all, we cannot place it on the map.
-        // You can choose to still return it with null coords, but current UI expects numbers.
-        if (!latest) return null;
-
-        const imageUrlFromDb = row.image_url ?? null;
+        const apiId = Number.isFinite(externalIdNum) ? externalIdNum : internalId;
 
         const shark: Shark = {
-          id: externalId,
-          name: row.name ?? `Shark ${externalId}`,
+          id: apiId,
+          external_id: externalIdRaw ?? undefined,
+          name: row.name ?? `Shark ${externalIdRaw ?? internalId}`,
           species: row.species ?? "Unknown species",
           latitude: Number(latest.lat),
           longitude: Number(latest.lng),
-          imageUrl: imageUrlFromDb,
-          last_update: row.last_update ?? latest.time ?? null,
-          zPing: row.z_ping ?? null,
-          zPingTime: row.z_ping_time ?? null,
+          imageUrl: row.image_url ?? null,
+          last_update: latest.time ?? safeIso(row.updated_at),
           track,
         };
 
@@ -142,12 +144,11 @@ router.get("/sharks", async (_req, res) => {
       })
       .filter((s): s is Shark => s !== null);
 
-    // 4) Add approximate SST (°C)
+    // 5) Add approximate SST (°C)
     const sharksWithSst = await addApproxSstToSharks(sharks);
-
     return res.json(sharksWithSst);
   } catch (err: any) {
-    console.error("Error in /api/sharks (db-based):", err);
+    console.error("Error in GET /api/sharks:", err);
     return res
       .status(500)
       .json({ error: err?.message ?? "Internal server error" });
@@ -157,59 +158,76 @@ router.get("/sharks", async (_req, res) => {
 /**
  * GET /api/sharks/:id/track?hours=24
  *
- * :id    = external_id from Mapotic (same as `id` from /api/sharks)
- * hours  = OPTIONAL: how many hours back to return (if omitted, returns full history)
+ * :id can be:
+ *   - external_id (numeric-like string, most common)
+ *   - OR internal sharks.id (fallback)
  *
- * Uses Supabase tables:
- *   sharks(external_id) -> sharks(id)
- *   shark_positions(shark_id, lat, lng, source_timestamp, created_at)
+ * hours is OPTIONAL: how many hours back to return.
+ * If omitted, returns full history.
  */
 router.get("/sharks/:id/track", async (req, res) => {
   try {
-    const externalId = req.params.id; // Mapotic id as string
+    const idParam = req.params.id; // could be external_id or internal id
     const hoursRaw = req.query.hours as string | undefined;
 
-    // If `hours` is provided, filter to that recent window. If omitted, return full history.
     const hours = hoursRaw ? Number(hoursRaw) : null;
-
     const sinceIso =
       hours != null && Number.isFinite(hours) && hours > 0
         ? new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
         : null;
 
-    // 1) find internal shark.id from external_id
-    const { data: sharkRow, error: sharkError } = await supabaseAdmin
+    // 1) Resolve internal shark id
+    // First try external_id match (stored as TEXT)
+    let internalId: number | null = null;
+
+    const { data: byExternal, error: extErr } = await supabaseAdmin
       .from("sharks")
       .select("id")
-      .eq("external_id", externalId)
-      .single();
+      .eq("external_id", idParam)
+      .maybeSingle();
 
-    if (sharkError) {
-      console.error("Supabase sharks lookup error:", sharkError);
-      // frontend treats [] as "no data", so don't 500 here
+    if (extErr) {
+      console.error("Supabase sharks external_id lookup error:", extErr);
+      // continue to internal-id fallback
+    }
+
+    if (byExternal?.id != null) {
+      internalId = Number(byExternal.id);
+    } else {
+      // fallback: treat param as internal numeric id
+      const asNum = Number(idParam);
+      if (Number.isFinite(asNum)) {
+        const { data: byInternal, error: intErr } = await supabaseAdmin
+          .from("sharks")
+          .select("id")
+          .eq("id", asNum)
+          .maybeSingle();
+
+        if (intErr) {
+          console.error("Supabase sharks internal id lookup error:", intErr);
+        } else if (byInternal?.id != null) {
+          internalId = Number(byInternal.id);
+        }
+      }
+    }
+
+    if (!internalId) {
       return res.json([]);
     }
 
-    if (!sharkRow) {
-      return res.json([]);
-    }
-
-    const sharkId = sharkRow.id;
-
-    // 2) get historical positions (NO RESTRICTION unless hours is provided)
-    let posQuery = supabaseAdmin
+    // 2) Fetch positions (optionally filtered)
+    let q = supabaseAdmin
       .from("shark_positions")
       .select("lat, lng, source_timestamp, created_at")
-      .eq("shark_id", sharkId);
+      .eq("shark_id", internalId);
 
     if (sinceIso) {
-      posQuery = posQuery.gte("created_at", sinceIso);
+      q = q.gte("created_at", sinceIso);
     }
 
-    const { data: positions, error: posError } = await posQuery.order(
-      "created_at",
-      { ascending: true }
-    );
+    const { data: positions, error: posError } = await q.order("created_at", {
+      ascending: true,
+    });
 
     if (posError) {
       console.error("Supabase shark_positions error:", posError);
@@ -217,15 +235,15 @@ router.get("/sharks/:id/track", async (req, res) => {
     }
 
     const result =
-      positions?.map((row) => ({
+      (positions as any[] | null)?.map((row) => ({
         latitude: row.lat,
         longitude: row.lng,
-        timestamp: row.source_timestamp ?? row.created_at,
+        timestamp: safeIso(row.source_timestamp ?? row.created_at),
       })) ?? [];
 
     return res.json(result);
   } catch (err: any) {
-    console.error("Error in /api/sharks/:id/track:", err);
+    console.error("Error in GET /api/sharks/:id/track:", err);
     return res
       .status(500)
       .json({ error: err?.message ?? "Internal server error" });
