@@ -147,9 +147,12 @@ export default function SharkMap() {
   }, []);
 
   // ✅ UI restriction removed: do NOT filter by monthsBack anymore
-  const activeRemote = remoteSharks.filter(
-    (s) => s.latitude != null && s.longitude != null
-  );
+    const activeRemote = remoteSharks.filter(
+      (s) =>
+        s.latitude != null &&
+        s.longitude != null &&
+        isSharkWithinMonths(s, monthsBack)
+    );
 
   const now = new Date();
   const fromDate = new Date(now);
