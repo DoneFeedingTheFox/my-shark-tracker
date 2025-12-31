@@ -1,12 +1,6 @@
 ﻿// src/SharkMap.jsx
 import { useEffect, useState, useRef, useMemo } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-} from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-arrowheads";
@@ -16,8 +10,7 @@ import { API_BASE_URL } from "./config";
 // Fix default marker icon paths (Vite + Leaflet quirk)
 const defaultIcon = new L.Icon({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
   iconSize: [25, 41],
   iconAnchor: [12, 41],
@@ -135,9 +128,7 @@ export default function SharkMap() {
         setError(null);
         const resp = await fetch(`${API_BASE_URL}/api/sharks`);
         if (!resp.ok) {
-          throw new Error(
-            `Shark API error: ${resp.status} ${resp.statusText}`
-          );
+          throw new Error(`Shark API error: ${resp.status} ${resp.statusText}`);
         }
 
         const data = await resp.json();
@@ -155,11 +146,9 @@ export default function SharkMap() {
     fetchRemoteSharks();
   }, []);
 
+  // ✅ UI restriction removed: do NOT filter by monthsBack anymore
   const activeRemote = remoteSharks.filter(
-    (s) =>
-      s.latitude != null &&
-      s.longitude != null &&
-      isSharkWithinMonths(s, monthsBack)
+    (s) => s.latitude != null && s.longitude != null
   );
 
   const now = new Date();
@@ -207,14 +196,11 @@ export default function SharkMap() {
       : 0;
 
   const currentPlaybackPoint =
-    selectedTrack && selectedTrack.length
-      ? selectedTrack[playbackSafeIndex]
-      : null;
+    selectedTrack && selectedTrack.length ? selectedTrack[playbackSafeIndex] : null;
 
   // Add arrowheads to the full selected-shark track whenever the track changes
   useEffect(() => {
-    if (!fullTrackRef.current || !selectedTrack || selectedTrack.length < 2)
-      return;
+    if (!fullTrackRef.current || !selectedTrack || selectedTrack.length < 2) return;
 
     const polyline = fullTrackRef.current;
 
@@ -272,10 +258,7 @@ export default function SharkMap() {
     allTimelineTimes.length > 0
       ? new Date(
           allTimelineTimes[
-            Math.min(
-              Math.max(timelineIndex, 0),
-              allTimelineTimes.length - 1
-            )
+            Math.min(Math.max(timelineIndex, 0), allTimelineTimes.length - 1)
           ]
         )
       : null;
@@ -296,14 +279,9 @@ export default function SharkMap() {
   }, [currentTimelineTime]);
 
   // SST layer uses the debounced time
-  const sstTileUrl = useMemo(
-    () => buildSstTileUrl(sstTimelineTime),
-    [sstTimelineTime]
-  );
+  const sstTileUrl = useMemo(() => buildSstTileUrl(sstTimelineTime), [sstTimelineTime]);
 
-  const timelineTimeMs = currentTimelineTime
-    ? currentTimelineTime.getTime()
-    : null;
+  const timelineTimeMs = currentTimelineTime ? currentTimelineTime.getTime() : null;
 
   // 🔁 Get shark position at current global timeline time
   const getPositionAtTime = (shark) => {
@@ -431,31 +409,18 @@ export default function SharkMap() {
             />
           )}
 
-          {/* Background: 7-day tracks for ALL sharks (still based on "now") */}
+          {/* Background: full tracks for ALL sharks (no time restriction) */}
           {activeRemote.map((s) => {
             const fullTrack = s.track || [];
-            if (!fullTrack.length) return null;
+            if (fullTrack.length < 2) return null;
 
-            const cutoff = now.getTime() - WEEK_MS;
-            const recentTrack = fullTrack.filter((p) => {
-              if (!p.time) return false;
-              const t = new Date(p.time).getTime();
-              return !isNaN(t) && t >= cutoff;
-            });
-
-            // Skip if not enough points, or if this is the selected shark
-            if (
-              !recentTrack ||
-              recentTrack.length < 2 ||
-              (selectedShark && s.id === selectedShark.id)
-            ) {
-              return null;
-            }
+            // Skip if this is the selected shark
+            if (selectedShark && s.id === selectedShark.id) return null;
 
             return (
               <Polyline
                 key={`bg-track-${s.id}`}
-                positions={recentTrack.map((p) => [p.lat, p.lng])}
+                positions={fullTrack.map((p) => [p.lat, p.lng])}
                 pathOptions={{
                   color: "#00bcd4",
                   weight: 2,
@@ -498,9 +463,7 @@ export default function SharkMap() {
                   <Popup>
                     <strong>{selectedShark?.name}</strong>
                     <br />
-                    {p.time
-                      ? new Date(p.time).toLocaleString()
-                      : "Unknown time"}
+                    {p.time ? new Date(p.time).toLocaleString() : "Unknown time"}
                   </Popup>
                 </Marker>
               ))}
@@ -508,10 +471,7 @@ export default function SharkMap() {
               {/* Moving playback marker – small dot so it doesn't hide the line */}
               {currentPlaybackPoint && (
                 <Marker
-                  position={[
-                    currentPlaybackPoint.lat,
-                    currentPlaybackPoint.lng,
-                  ]}
+                  position={[currentPlaybackPoint.lat, currentPlaybackPoint.lng]}
                   icon={L.divIcon({
                     className: "playback-point-icon",
                     html: '<div class="playback-point-dot"></div>',
@@ -531,8 +491,7 @@ export default function SharkMap() {
 
           {/* Remote sharks (position following global timeline) */}
           {activeRemote.map((s) => {
-            const lastTime =
-              s.last_update || s.lastMove || s.last_move || null;
+            const lastTime = s.last_update || s.lastMove || s.last_move || null;
 
             const pos = getPositionAtTime(s);
             if (!pos) return null;
@@ -545,31 +504,19 @@ export default function SharkMap() {
                   click(e) {
                     // click selects shark in sidebar and ensures popup is open
                     setSelectedSharkId(s.id);
-                    if (
-                      e &&
-                      e.target &&
-                      typeof e.target.openPopup === "function"
-                    ) {
+                    if (e && e.target && typeof e.target.openPopup === "function") {
                       e.target.openPopup();
                     }
                   },
                   mouseover(e) {
                     // hover shows popup (does NOT change selected shark)
-                    if (
-                      e &&
-                      e.target &&
-                      typeof e.target.openPopup === "function"
-                    ) {
+                    if (e && e.target && typeof e.target.openPopup === "function") {
                       e.target.openPopup();
                     }
                   },
                   mouseout(e) {
                     // leaving marker hides popup
-                    if (
-                      e &&
-                      e.target &&
-                      typeof e.target.closePopup === "function"
-                    ) {
+                    if (e && e.target && typeof e.target.closePopup === "function") {
                       e.target.closePopup();
                     }
                   },
@@ -628,9 +575,7 @@ export default function SharkMap() {
       </button>
 
       {/* LEFT: Shark Explorer drawer */}
-      <aside
-        className={`drawer drawer-left ${showExplorer ? "drawer-open" : ""}`}
-      >
+      <aside className={`drawer drawer-left ${showExplorer ? "drawer-open" : ""}`}>
         <h2 className="panel-title">Shark explorer</h2>
 
         {loading && (
@@ -640,15 +585,12 @@ export default function SharkMap() {
         )}
 
         {!loading && error && (
-          <p
-            className="muted"
-            style={{ marginBottom: "0.75rem", color: "#f97373" }}
-          >
+          <p className="muted" style={{ marginBottom: "0.75rem", color: "#f97373" }}>
             Could not reach backend, please try again.
           </p>
         )}
 
-        {/* Time filter slider */}
+        {/* Time filter slider (currently does not filter activeRemote) */}
         <div className="stat-card">
           <div className="stat-label">Show sharks active in last</div>
           <div className="stat-value">{formatMonthsLabel(monthsBack)}</div>
@@ -659,10 +601,7 @@ export default function SharkMap() {
             value={monthsBack}
             onChange={(e) => setMonthsBack(Number(e.target.value))}
           />
-          <div
-            className="muted"
-            style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}
-          >
+          <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
             Since {fromDate.toLocaleDateString()}
           </div>
         </div>
@@ -726,7 +665,6 @@ export default function SharkMap() {
                 gap: "0.35rem",
               }}
             >
-              {/* Simple horizontal color bar */}
               <div
                 style={{
                   height: "10px",
@@ -749,15 +687,11 @@ export default function SharkMap() {
                 <span>~20 °C</span>
                 <span>~30 °C+</span>
               </div>
-              <p
-                className="muted"
-                style={{ fontSize: "0.75rem", lineHeight: 1.4 }}
-              >
-                Colors show <strong>sea surface temperature</strong> from the
-                NASA GHRSST MUR dataset. Dark blues are cold water,
-                greens/yellows are temperate, and oranges/reds are warm tropical
-                waters. Values are approximate and usually 1–2 days behind real
-                time.
+              <p className="muted" style={{ fontSize: "0.75rem", lineHeight: 1.4 }}>
+                Colors show <strong>sea surface temperature</strong> from the NASA GHRSST
+                MUR dataset. Dark blues are cold water, greens/yellows are temperate,
+                and oranges/reds are warm tropical waters. Values are approximate and
+                usually 1–2 days behind real time.
               </p>
             </div>
           </div>
@@ -766,27 +700,24 @@ export default function SharkMap() {
         <div className="divider" />
 
         <p className="muted">
-          Active in range: <strong>{activeRemote.length}</strong> / Total
-          fetched: <strong>{remoteSharks.length}</strong>
+          Active in range: <strong>{activeRemote.length}</strong> / Total fetched:{" "}
+          <strong>{remoteSharks.length}</strong>
         </p>
       </aside>
 
       {/* RIGHT: Selected shark drawer */}
-      <aside
-        className={`drawer drawer-right ${showDetails ? "drawer-open" : ""}`}
-      >
+      <aside className={`drawer drawer-right ${showDetails ? "drawer-open" : ""}`}>
         <h3 className="panel-subtitle">Selected shark</h3>
 
         {!loading && !error && !selectedShark && (
           <p className="muted">
-            No sharks in this time range. Try moving the slider to include more
-            months, then click a marker on the map to see details.
+            No sharks in this time range. Try moving the slider to include more months,
+            then click a marker on the map to see details.
           </p>
         )}
 
         {!loading && !error && selectedShark && (
           <>
-            {/* 📷 Image for selected shark */}
             {selectedShark.imageUrl && (
               <div className="stat-card">
                 <div className="stat-label">Photo</div>
@@ -811,9 +742,7 @@ export default function SharkMap() {
 
             <div className="stat-card">
               <div className="stat-label">Species</div>
-              <div className="stat-value">
-                {selectedShark.species || "Unknown species"}
-              </div>
+              <div className="stat-value">{selectedShark.species || "Unknown species"}</div>
             </div>
 
             <div className="stat-card">
@@ -822,9 +751,7 @@ export default function SharkMap() {
                 {selectedShark.last_update
                   ? new Date(selectedShark.last_update).toLocaleString()
                   : selectedShark.lastMove || selectedShark.last_move
-                  ? new Date(
-                      selectedShark.lastMove || selectedShark.last_move
-                    ).toLocaleString()
+                  ? new Date(selectedShark.lastMove || selectedShark.last_move).toLocaleString()
                   : "Unknown"}
               </div>
             </div>
@@ -873,28 +800,18 @@ export default function SharkMap() {
                     />
                   </div>
 
-                  <div
-                    className="muted"
-                    style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}
-                  >
-                    {selectedTrack[0]?.time &&
-                      selectedTrack[selectedTrack.length - 1]?.time && (
-                        <>
-                          {new Date(
-                            selectedTrack[0].time
-                          ).toLocaleString()}{" "}
-                          →{" "}
-                          {new Date(
-                            selectedTrack[selectedTrack.length - 1].time
-                          ).toLocaleString()}
-                          <br />
-                        </>
-                      )}
+                  <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
+                    {selectedTrack[0]?.time && selectedTrack[selectedTrack.length - 1]?.time && (
+                      <>
+                        {new Date(selectedTrack[0].time).toLocaleString()} →{" "}
+                        {new Date(selectedTrack[selectedTrack.length - 1].time).toLocaleString()}
+                        <br />
+                      </>
+                    )}
 
                     {currentPlaybackPoint?.time && (
                       <>
-                        Current:{" "}
-                        {new Date(currentPlaybackPoint.time).toLocaleString()}
+                        Current: {new Date(currentPlaybackPoint.time).toLocaleString()}
                       </>
                     )}
                   </div>
@@ -914,8 +831,7 @@ export default function SharkMap() {
         <div className="timeline-info">
           {currentTimelineTime ? (
             <>
-              Timeline:{" "}
-              <strong>{currentTimelineTime.toLocaleString()}</strong>
+              Timeline: <strong>{currentTimelineTime.toLocaleString()}</strong>
             </>
           ) : (
             <>
@@ -929,10 +845,7 @@ export default function SharkMap() {
           max={Math.max(allTimelineTimes.length - 1, 0)}
           value={
             allTimelineTimes.length > 0
-              ? Math.min(
-                  Math.max(timelineIndex, 0),
-                  allTimelineTimes.length - 1
-                )
+              ? Math.min(Math.max(timelineIndex, 0), allTimelineTimes.length - 1)
               : 0
           }
           onChange={(e) => setTimelineIndex(Number(e.target.value))}
