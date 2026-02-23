@@ -149,6 +149,8 @@ export default function SharkMap() {
   const [providerFilter, setProviderFilter] = useState("all");
   const [freshnessFilter, setFreshnessFilter] = useState("all");
 
+  const [providerFilter, setProviderFilter] = useState("all");
+
   // 🌍 Global timeline state (for all animals / environment)
   const [timelineIndex, setTimelineIndex] = useState(0);
 
@@ -186,6 +188,8 @@ export default function SharkMap() {
   }, []);
 
   const activeRemote = remoteSharks.filter((s) => {
+  // ✅ UI restriction removed: do NOT filter by monthsBack anymore
+    const activeRemote = remoteSharks.filter((s) => {
     const hasLocation = s.latitude != null && s.longitude != null;
     const isInWindow = isSharkWithinMonths(s, monthsBack);
     const matchesProvider =
@@ -196,6 +200,7 @@ export default function SharkMap() {
       freshnessFilter === "all" ? true : freshnessTier === freshnessFilter;
 
     return hasLocation && isInWindow && matchesProvider && matchesFreshness;
+    return hasLocation && isInWindow && matchesProvider;
   });
 
   const availableProviders = useMemo(() => {
