@@ -37,8 +37,6 @@ const BATHYMETRY_TILE_URL =
 const OCEAN_REFERENCE_TILE_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 
-const SEAMARK_TILE_URL = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png";
-
 // Build SST tile URL for a given date (or "default" for latest)
 function buildSstTileUrl(timelineTime) {
   // No timeline yet → fall back to latest "default"
@@ -115,7 +113,6 @@ export default function SharkMap() {
   const [showSst, setShowSst] = useState(true);
   const [showBathymetry, setShowBathymetry] = useState(true);
   const [showOceanReference, setShowOceanReference] = useState(true);
-  const [showSeamarks, setShowSeamarks] = useState(false);
 
   const [providerFilter, setProviderFilter] = useState("all");
 
@@ -155,7 +152,8 @@ export default function SharkMap() {
     fetchRemoteSharks();
   }, []);
 
-  const activeRemote = remoteSharks.filter((s) => {
+  // ✅ UI restriction removed: do NOT filter by monthsBack anymore
+    const activeRemote = remoteSharks.filter((s) => {
     const hasLocation = s.latitude != null && s.longitude != null;
     const isInWindow = isSharkWithinMonths(s, monthsBack);
     const matchesProvider =
@@ -439,14 +437,6 @@ export default function SharkMap() {
             />
           )}
 
-          {showSeamarks && (
-            <TileLayer
-              url={SEAMARK_TILE_URL}
-              attribution="Seamarks © OpenSeaMap contributors"
-              opacity={0.8}
-            />
-          )}
-
           {/* Background: full tracks for ALL sharks (no time restriction) */}
           {activeRemote.map((s) => {
             const fullTrack = s.track || [];
@@ -580,10 +570,6 @@ export default function SharkMap() {
                   <br />
                   Source: {s.sourceProvider || "mapotic"}
                   <br />
-                  SST: {s.approxSst != null ? `${s.approxSst.toFixed(1)} °C` : "n/a"}
-                  <br />
-                  Wave height: {s.approxWaveHeight != null ? `${s.approxWaveHeight.toFixed(1)} m` : "n/a"}
-                  <br />
                   {lastTime ? (
                     <>
                       Last update: {new Date(lastTime).toLocaleString()}
@@ -708,22 +694,6 @@ export default function SharkMap() {
                 onChange={(e) => setShowOceanReference(e.target.checked)}
               />
               <span>Ocean reference labels</span>
-            </label>
-
-            <label
-              style={{
-                display: "flex",
-                gap: "0.5rem",
-                alignItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={showSeamarks}
-                onChange={(e) => setShowSeamarks(e.target.checked)}
-              />
-              <span>Seamarks & shipping context</span>
             </label>
           </div>
         </div>
