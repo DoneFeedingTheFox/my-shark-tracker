@@ -149,8 +149,6 @@ export default function SharkMap() {
   const [providerFilter, setProviderFilter] = useState("all");
   const [freshnessFilter, setFreshnessFilter] = useState("all");
 
-  const [providerFilter, setProviderFilter] = useState("all");
-
   // 🌍 Global timeline state (for all animals / environment)
   const [timelineIndex, setTimelineIndex] = useState(0);
 
@@ -188,8 +186,6 @@ export default function SharkMap() {
   }, []);
 
   const activeRemote = remoteSharks.filter((s) => {
-  // ✅ UI restriction removed: do NOT filter by monthsBack anymore
-    const activeRemote = remoteSharks.filter((s) => {
     const hasLocation = s.latitude != null && s.longitude != null;
     const isInWindow = isSharkWithinMonths(s, monthsBack);
     const matchesProvider =
@@ -200,7 +196,6 @@ export default function SharkMap() {
       freshnessFilter === "all" ? true : freshnessTier === freshnessFilter;
 
     return hasLocation && isInWindow && matchesProvider && matchesFreshness;
-    return hasLocation && isInWindow && matchesProvider;
   });
 
   const availableProviders = useMemo(() => {
@@ -817,11 +812,13 @@ export default function SharkMap() {
         )}
 
         <div className="stat-card">
-          <div className="stat-label">Tracking provider</div>
+          <div className="stat-label">Filters</div>
+
+          <div className="panel-subtitle" style={{ marginTop: "0.35rem" }}>Tracking provider</div>
           <select
             value={providerFilter}
             onChange={(e) => setProviderFilter(e.target.value)}
-            style={{ marginTop: "0.35rem", width: "100%" }}
+            style={{ width: "100%" }}
           >
             {availableProviders.map((provider) => (
               <option key={provider} value={provider}>
@@ -829,17 +826,12 @@ export default function SharkMap() {
               </option>
             ))}
           </select>
-          <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
-            Tip: set <code>NORWAY_TRACKING_GEOJSON_URL</code> in backend to ingest Norway-focused feed.
-          </div>
-        </div>
 
-        <div className="stat-card">
-          <div className="stat-label">Data freshness</div>
+          <div className="panel-subtitle" style={{ marginTop: "0.45rem" }}>Data freshness</div>
           <select
             value={freshnessFilter}
             onChange={(e) => setFreshnessFilter(e.target.value)}
-            style={{ marginTop: "0.35rem", width: "100%" }}
+            style={{ width: "100%" }}
           >
             <option value="all">All updates</option>
             <option value="fresh">Fresh (≤ 7 days)</option>
@@ -847,8 +839,20 @@ export default function SharkMap() {
             <option value="stale">Stale (&gt; 30 days)</option>
             <option value="unknown">Unknown</option>
           </select>
-          <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
-            Marker colors: green=fresh, amber=recent, red=stale, gray=unknown.
+
+          <button
+            type="button"
+            onClick={() => {
+              setProviderFilter("all");
+              setFreshnessFilter("all");
+            }}
+            style={{ marginTop: "0.5rem", width: "100%" }}
+          >
+            Reset filters
+          </button>
+
+          <div className="muted" style={{ marginTop: "0.35rem", fontSize: "0.8rem" }}>
+            Marker colors: green=fresh, amber=recent, red=stale, gray=unknown. Tip: set <code>NORWAY_TRACKING_GEOJSON_URL</code> in backend to ingest Norway-focused feed.
           </div>
         </div>
 
