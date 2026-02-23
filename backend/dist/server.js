@@ -15,6 +15,15 @@ app.use((0, cors_1.default)());
 app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
 });
+// Root route for deploy probes and quick manual verification
+app.get("/", (_req, res) => {
+    res.json({
+        status: "ok",
+        message: "Shark backend is running",
+        health: "/health",
+        api: "/api",
+    });
+});
 // Manual trigger endpoint for the shark sync
 app.get("/admin/refresh-sharks", async (_req, res) => {
     try {
