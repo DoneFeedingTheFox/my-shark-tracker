@@ -1,4 +1,4 @@
-﻿// src/SharkMap.jsx
+// src/SharkMap.jsx
 import { useEffect, useState, useRef, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
 import L from "leaflet";
@@ -33,6 +33,11 @@ const SST_BASE_URL =
 
 const BATHYMETRY_TILE_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
+
+const OCEAN_REFERENCE_TILE_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
+
+const SEAMARK_TILE_URL = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png";
 
 // Build SST tile URL for a given date (or "default" for latest)
 function buildSstTileUrl(timelineTime) {
@@ -109,6 +114,10 @@ export default function SharkMap() {
   // 🌊 Environment layer toggles
   const [showSst, setShowSst] = useState(true);
   const [showBathymetry, setShowBathymetry] = useState(true);
+  const [showOceanReference, setShowOceanReference] = useState(true);
+  const [showSeamarks, setShowSeamarks] = useState(false);
+
+  const [providerFilter, setProviderFilter] = useState("all");
 
   // 🌍 Global timeline state (for all animals / environment)
   const [timelineIndex, setTimelineIndex] = useState(0);
@@ -146,13 +155,22 @@ export default function SharkMap() {
     fetchRemoteSharks();
   }, []);
 
-  // ✅ UI restriction removed: do NOT filter by monthsBack anymore
-    const activeRemote = remoteSharks.filter(
-      (s) =>
-        s.latitude != null &&
-        s.longitude != null &&
-        isSharkWithinMonths(s, monthsBack)
-    );
+  const activeRemote = remoteSharks.filter((s) => {
+    const hasLocation = s.latitude != null && s.longitude != null;
+    const isInWindow = isSharkWithinMonths(s, monthsBack);
+    const matchesProvider =
+      providerFilter === "all" ? true : (s.sourceProvider || "mapotic") === providerFilter;
+
+    return hasLocation && isInWindow && matchesProvider;
+  });
+
+  const availableProviders = useMemo(() => {
+    const providers = new Set(["mapotic"]);
+    for (const shark of remoteSharks) {
+      if (shark.sourceProvider) providers.add(shark.sourceProvider);
+    }
+    return ["all", ...Array.from(providers).sort()];
+  }, [remoteSharks]);
 
   const now = new Date();
   const fromDate = new Date(now);
@@ -412,6 +430,23 @@ export default function SharkMap() {
             />
           )}
 
+          {/* 🧭 Ocean labels / reference layer */}
+          {showOceanReference && (
+            <TileLayer
+              url={OCEAN_REFERENCE_TILE_URL}
+              attribution="Ocean reference &copy; Esri & contributors"
+              opacity={0.65}
+            />
+          )}
+
+          {showSeamarks && (
+            <TileLayer
+              url={SEAMARK_TILE_URL}
+              attribution="Seamarks © OpenSeaMap contributors"
+              opacity={0.8}
+            />
+          )}
+
           {/* Background: full tracks for ALL sharks (no time restriction) */}
           {activeRemote.map((s) => {
             const fullTrack = s.track || [];
@@ -543,6 +578,12 @@ export default function SharkMap() {
                   )}
                   {s.species || "Unknown species"}
                   <br />
+                  Source: {s.sourceProvider || "mapotic"}
+                  <br />
+                  SST: {s.approxSst != null ? `${s.approxSst.toFixed(1)} °C` : "n/a"}
+                  <br />
+                  Wave height: {s.approxWaveHeight != null ? `${s.approxWaveHeight.toFixed(1)} m` : "n/a"}
+                  <br />
                   {lastTime ? (
                     <>
                       Last update: {new Date(lastTime).toLocaleString()}
@@ -652,6 +693,38 @@ export default function SharkMap() {
               />
               <span>Bathymetry (ocean depth)</span>
             </label>
+
+            <label
+              style={{
+                display: "flex",
+                gap: "0.5rem",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showOceanReference}
+                onChange={(e) => setShowOceanReference(e.target.checked)}
+              />
+              <span>Ocean reference labels</span>
+            </label>
+
+            <label
+              style={{
+                display: "flex",
+                gap: "0.5rem",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showSeamarks}
+                onChange={(e) => setShowSeamarks(e.target.checked)}
+              />
+              <span>Seamarks & shipping context</span>
+            </label>
           </div>
         </div>
 
@@ -699,6 +772,24 @@ export default function SharkMap() {
             </div>
           </div>
         )}
+
+        <div className="stat-card">
+          <div className="stat-label">Tracking provider</div>
+          <select
+            value={providerFilter}
+            onChange={(e) => setProviderFilter(e.target.value)}
+            style={{ marginTop: "0.35rem", width: "100%" }}
+          >
+            {availableProviders.map((provider) => (
+              <option key={provider} value={provider}>
+                {provider === "all" ? "All providers" : provider}
+              </option>
+            ))}
+          </select>
+          <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
+            Tip: set <code>NORWAY_TRACKING_GEOJSON_URL</code> in backend to ingest Norway-focused feed.
+          </div>
+        </div>
 
         <div className="divider" />
 
@@ -762,8 +853,17 @@ export default function SharkMap() {
             <div className="stat-card">
               <div className="stat-label">Location</div>
               <div className="stat-value">
-                Lat: {selectedShark.latitude.toFixed(3)}, Lon:{" "}
+                Lat: {selectedShark.latitude.toFixed(3)}, Lon: {" "}
                 {selectedShark.longitude.toFixed(3)}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Ocean conditions (approx)</div>
+              <div className="stat-value">
+                SST: {selectedShark.approxSst != null ? `${selectedShark.approxSst.toFixed(1)} °C` : "n/a"}
+                <br />
+                Wave height: {selectedShark.approxWaveHeight != null ? `${selectedShark.approxWaveHeight.toFixed(1)} m` : "n/a"}
               </div>
             </div>
 
