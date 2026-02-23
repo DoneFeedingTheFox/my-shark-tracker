@@ -1,4 +1,4 @@
-﻿// src/SharkMap.jsx
+// src/SharkMap.jsx
 import { useEffect, useState, useRef, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
 import L from "leaflet";
@@ -33,6 +33,11 @@ const SST_BASE_URL =
 
 const BATHYMETRY_TILE_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
+
+const OCEAN_REFERENCE_TILE_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
+
+const SEAMARK_TILE_URL = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png";
 
 // Build SST tile URL for a given date (or "default" for latest)
 function buildSstTileUrl(timelineTime) {
@@ -89,6 +94,35 @@ function formatMonthsLabel(months) {
   return `${rounded} year${rounded === "1.0" ? "" : "s"}`;
 }
 
+function getFreshnessTier(lastUpdateIso) {
+  if (!lastUpdateIso) return "unknown";
+  const t = new Date(lastUpdateIso).getTime();
+  if (Number.isNaN(t)) return "unknown";
+
+  const ageDays = (Date.now() - t) / MS_PER_DAY;
+  if (ageDays <= 7) return "fresh";
+  if (ageDays <= 30) return "recent";
+  return "stale";
+}
+
+function makeSharkMarkerIcon(freshnessTier) {
+  const colorByTier = {
+    fresh: "#22c55e",
+    recent: "#f59e0b",
+    stale: "#ef4444",
+    unknown: "#94a3b8",
+  };
+  const color = colorByTier[freshnessTier] || colorByTier.unknown;
+
+  return L.divIcon({
+    className: "freshness-marker-icon",
+    html: `<div class="freshness-marker-dot" style="background:${color}"></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    popupAnchor: [0, -10],
+  });
+}
+
 export default function SharkMap() {
   const [remoteSharks, setRemoteSharks] = useState([]);
   const [monthsBack, setMonthsBack] = useState(DEFAULT_MONTHS_BACK);
@@ -109,6 +143,11 @@ export default function SharkMap() {
   // 🌊 Environment layer toggles
   const [showSst, setShowSst] = useState(true);
   const [showBathymetry, setShowBathymetry] = useState(true);
+  const [showOceanReference, setShowOceanReference] = useState(true);
+  const [showSeamarks, setShowSeamarks] = useState(false);
+
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [freshnessFilter, setFreshnessFilter] = useState("all");
 
   // 🌍 Global timeline state (for all animals / environment)
   const [timelineIndex, setTimelineIndex] = useState(0);
@@ -146,13 +185,26 @@ export default function SharkMap() {
     fetchRemoteSharks();
   }, []);
 
-  // ✅ UI restriction removed: do NOT filter by monthsBack anymore
-    const activeRemote = remoteSharks.filter(
-      (s) =>
-        s.latitude != null &&
-        s.longitude != null &&
-        isSharkWithinMonths(s, monthsBack)
-    );
+  const activeRemote = remoteSharks.filter((s) => {
+    const hasLocation = s.latitude != null && s.longitude != null;
+    const isInWindow = isSharkWithinMonths(s, monthsBack);
+    const matchesProvider =
+      providerFilter === "all" ? true : (s.sourceProvider || "mapotic") === providerFilter;
+
+    const freshnessTier = getFreshnessTier(s.last_update || s.lastMove || s.last_move || null);
+    const matchesFreshness =
+      freshnessFilter === "all" ? true : freshnessTier === freshnessFilter;
+
+    return hasLocation && isInWindow && matchesProvider && matchesFreshness;
+  });
+
+  const availableProviders = useMemo(() => {
+    const providers = new Set(["mapotic"]);
+    for (const shark of remoteSharks) {
+      if (shark.sourceProvider) providers.add(shark.sourceProvider);
+    }
+    return ["all", ...Array.from(providers).sort()];
+  }, [remoteSharks]);
 
   const now = new Date();
   const fromDate = new Date(now);
@@ -412,6 +464,23 @@ export default function SharkMap() {
             />
           )}
 
+          {/* 🧭 Ocean labels / reference layer */}
+          {showOceanReference && (
+            <TileLayer
+              url={OCEAN_REFERENCE_TILE_URL}
+              attribution="Ocean reference &copy; Esri & contributors"
+              opacity={0.65}
+            />
+          )}
+
+          {showSeamarks && (
+            <TileLayer
+              url={SEAMARK_TILE_URL}
+              attribution="Seamarks © OpenSeaMap contributors"
+              opacity={0.8}
+            />
+          )}
+
           {/* Background: full tracks for ALL sharks (no time restriction) */}
           {activeRemote.map((s) => {
             const fullTrack = s.track || [];
@@ -495,6 +564,7 @@ export default function SharkMap() {
           {/* Remote sharks (position following global timeline) */}
           {activeRemote.map((s) => {
             const lastTime = s.last_update || s.lastMove || s.last_move || null;
+            const freshnessTier = getFreshnessTier(lastTime);
 
             const pos = getPositionAtTime(s);
             if (!pos) return null;
@@ -503,6 +573,7 @@ export default function SharkMap() {
               <Marker
                 key={s.id}
                 position={[pos.lat, pos.lng]}
+                icon={makeSharkMarkerIcon(freshnessTier)}
                 eventHandlers={{
                   click(e) {
                     // click selects shark in sidebar and ensures popup is open
@@ -542,6 +613,14 @@ export default function SharkMap() {
                     />
                   )}
                   {s.species || "Unknown species"}
+                  <br />
+                  Source: {s.sourceProvider || "mapotic"}
+                  <br />
+                  Freshness: {freshnessTier}
+                  <br />
+                  SST: {s.approxSst != null ? `${s.approxSst.toFixed(1)} °C` : "n/a"}
+                  <br />
+                  Wave height: {s.approxWaveHeight != null ? `${s.approxWaveHeight.toFixed(1)} m` : "n/a"}
                   <br />
                   {lastTime ? (
                     <>
@@ -652,6 +731,38 @@ export default function SharkMap() {
               />
               <span>Bathymetry (ocean depth)</span>
             </label>
+
+            <label
+              style={{
+                display: "flex",
+                gap: "0.5rem",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showOceanReference}
+                onChange={(e) => setShowOceanReference(e.target.checked)}
+              />
+              <span>Ocean reference labels</span>
+            </label>
+
+            <label
+              style={{
+                display: "flex",
+                gap: "0.5rem",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showSeamarks}
+                onChange={(e) => setShowSeamarks(e.target.checked)}
+              />
+              <span>Seamarks & shipping context</span>
+            </label>
           </div>
         </div>
 
@@ -699,6 +810,42 @@ export default function SharkMap() {
             </div>
           </div>
         )}
+
+        <div className="stat-card">
+          <div className="stat-label">Tracking provider</div>
+          <select
+            value={providerFilter}
+            onChange={(e) => setProviderFilter(e.target.value)}
+            style={{ marginTop: "0.35rem", width: "100%" }}
+          >
+            {availableProviders.map((provider) => (
+              <option key={provider} value={provider}>
+                {provider === "all" ? "All providers" : provider}
+              </option>
+            ))}
+          </select>
+          <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
+            Tip: set <code>NORWAY_TRACKING_GEOJSON_URL</code> in backend to ingest Norway-focused feed.
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-label">Data freshness</div>
+          <select
+            value={freshnessFilter}
+            onChange={(e) => setFreshnessFilter(e.target.value)}
+            style={{ marginTop: "0.35rem", width: "100%" }}
+          >
+            <option value="all">All updates</option>
+            <option value="fresh">Fresh (≤ 7 days)</option>
+            <option value="recent">Recent (8–30 days)</option>
+            <option value="stale">Stale (&gt; 30 days)</option>
+            <option value="unknown">Unknown</option>
+          </select>
+          <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.8rem" }}>
+            Marker colors: green=fresh, amber=recent, red=stale, gray=unknown.
+          </div>
+        </div>
 
         <div className="divider" />
 
@@ -762,8 +909,17 @@ export default function SharkMap() {
             <div className="stat-card">
               <div className="stat-label">Location</div>
               <div className="stat-value">
-                Lat: {selectedShark.latitude.toFixed(3)}, Lon:{" "}
+                Lat: {selectedShark.latitude.toFixed(3)}, Lon: {" "}
                 {selectedShark.longitude.toFixed(3)}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Ocean conditions (approx)</div>
+              <div className="stat-value">
+                SST: {selectedShark.approxSst != null ? `${selectedShark.approxSst.toFixed(1)} °C` : "n/a"}
+                <br />
+                Wave height: {selectedShark.approxWaveHeight != null ? `${selectedShark.approxWaveHeight.toFixed(1)} m` : "n/a"}
               </div>
             </div>
 
