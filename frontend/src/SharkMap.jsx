@@ -763,6 +763,14 @@ export default function SharkMap() {
               />
               <span>Seamarks & shipping context</span>
             </label>
+
+            {showSeamarks && (
+              <p className="muted" style={{ marginTop: "0.35rem", fontSize: "0.78rem" }}>
+                Expect navigation aids and maritime overlays (buoys, beacons, harbor markers,
+                separation lanes, and fairways). These are often sparse in open ocean, and are
+                easiest to notice when zoomed in near coastlines and ports.
+              </p>
+            )}
           </div>
         </div>
 
