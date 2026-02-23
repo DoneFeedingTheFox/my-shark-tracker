@@ -5,182 +5,194 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 // backend/src/sharks.ts
 const express_1 = __importDefault(require("express"));
-// import fetch from "node-fetch"; // no longer needed
 const supabaseAdmin_1 = require("./lib/supabaseAdmin");
 const sstClient_1 = require("./lib/sstClient");
 const router = express_1.default.Router();
 /**
- * Helper: add approximate SST to each shark sequentially
- * to avoid hammering the Open-Meteo API with parallel calls.
+ * Adds approximate SST in °C for each shark using a cached helper.
+ * Runs sequentially to avoid rate limiting (429).
  */
 async function addApproxSstToSharks(sharks) {
-    const result = [];
-    for (const shark of sharks) {
+    const out = [];
+    for (const s of sharks) {
         try {
-            const sst = await (0, sstClient_1.fetchSeaSurfaceTemperature)(shark.latitude, shark.longitude);
-            result.push({ ...shark, approxSst: sst ?? null });
+            const sst = await (0, sstClient_1.fetchSeaSurfaceTemperature)(s.latitude, s.longitude);
+            out.push({ ...s, approxSst: sst ?? null });
         }
-        catch (e) {
-            console.warn(`[SST] Failed for shark ${shark.id} (${shark.name}):`, e);
-            result.push({ ...shark, approxSst: null });
+        catch {
+            out.push({ ...s, approxSst: null });
         }
     }
-    return result;
+    return out;
+}
+function safeIso(value) {
+    if (!value)
+        return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+function pickMostRecentIso(primary, fallback) {
+    const primaryIso = safeIso(primary);
+    const fallbackIso = safeIso(fallback);
+    if (primaryIso && fallbackIso) {
+        return new Date(primaryIso).getTime() >= new Date(fallbackIso).getTime()
+            ? primaryIso
+            : fallbackIso;
+    }
+    return primaryIso ?? fallbackIso;
 }
 /**
  * GET /api/sharks
  *
- * Now served from Supabase instead of the external API.
- * Uses:
- *   sharks(id, external_id, name, species, meta, image_url)
- *   shark_positions(shark_id, lat, lng, source_timestamp, created_at)
+ * Returns sharks + full historical track data from Supabase.
+ *
+ * Tables:
+ *  - sharks(id, external_id(TEXT), name, species, image_url, updated_at, ...)
+ *  - shark_positions(shark_id, lat, lng, source_timestamp, created_at)
  */
 router.get("/sharks", async (_req, res) => {
     try {
-        // 1) Load all sharks (now also selecting image_url)
-        const { data: sharkRows, error: sharkErr } = await supabaseAdmin_1.supabaseAdmin
+        // 1) Load all sharks
+        const { data: sharkRows, error: sharkError } = await supabaseAdmin_1.supabaseAdmin
             .from("sharks")
-            .select("id, external_id, name, species, meta, image_url");
-        if (sharkErr) {
-            console.error("Supabase sharks error:", sharkErr);
-            return res
-                .status(500)
-                .json({ error: sharkErr.message ?? "Failed to load sharks" });
+            .select("id, external_id, name, species, image_url, updated_at")
+            .order("id", { ascending: true });
+        if (sharkError) {
+            console.error("Supabase sharks error:", sharkError);
+            return res.status(500).json({ error: sharkError.message });
         }
-        if (!sharkRows || sharkRows.length === 0) {
+        const sharksDb = sharkRows ?? [];
+        if (sharksDb.length === 0)
             return res.json([]);
-        }
-        // Optional: limit how far back tracks go (in days)
-        const TRACK_DAYS = 7;
-        const cutoffIso = new Date(Date.now() - TRACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
-        // 2) Load positions (for all sharks), newest first
-        const { data: posRows, error: posErr } = await supabaseAdmin_1.supabaseAdmin
+        // 2) Load ALL positions for those sharks (NO TIME RESTRICTION)
+        const internalIds = sharksDb.map((s) => s.id);
+        const { data: posRows, error: posError } = await supabaseAdmin_1.supabaseAdmin
             .from("shark_positions")
             .select("shark_id, lat, lng, source_timestamp, created_at")
-            // use created_at for the cutoff, like your /track endpoint
-            .gte("created_at", cutoffIso)
-            .order("created_at", { ascending: false });
-        if (posErr) {
-            console.error("Supabase shark_positions error:", posErr);
-            return res
-                .status(500)
-                .json({ error: posErr.message ?? "Failed to load positions" });
+            .in("shark_id", internalIds)
+            .order("created_at", { ascending: true });
+        if (posError) {
+            console.error("Supabase shark_positions error:", posError);
+            return res.status(500).json({ error: posError.message });
         }
-        // Build a map of latest position per shark_id
-        const latestPosByShark = new Map();
-        // Build a map of full track per shark_id
+        const positions = posRows ?? [];
+        // 3) Group positions by internal shark_id -> track[]
         const trackByShark = new Map();
-        if (posRows) {
-            for (const row of posRows) {
-                const sharkId = row.shark_id;
-                // latest position – first row we see for each shark (because of DESC order)
-                if (!latestPosByShark.has(sharkId)) {
-                    latestPosByShark.set(sharkId, row);
-                }
-                // full track – collect all points (we'll sort oldest->newest later)
-                const time = row.source_timestamp ?? row.created_at ?? new Date().toISOString();
-                const point = {
-                    lat: Number(row.lat),
-                    lng: Number(row.lng),
-                    time: new Date(time).toISOString(),
-                };
-                if (!trackByShark.has(sharkId)) {
-                    trackByShark.set(sharkId, []);
-                }
-                trackByShark.get(sharkId).push(point);
-            }
+        for (const row of positions) {
+            const sid = row.shark_id;
+            const lat = Number(row.lat);
+            const lng = Number(row.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng))
+                continue;
+            const isoTime = pickMostRecentIso(row.source_timestamp, row.created_at);
+            if (!isoTime)
+                continue;
+            const list = trackByShark.get(sid) ?? [];
+            list.push({ lat, lng, time: isoTime });
+            trackByShark.set(sid, list);
         }
-        // ensure each track is in chronological order (oldest -> newest)
-        for (const [key, points] of trackByShark.entries()) {
-            points.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-            trackByShark.set(key, points);
-        }
-        // 3) Combine into API sharks (without SST yet)
-        const sharks = sharkRows
+        const getLatest = (track) => track.length ? track[track.length - 1] : null;
+        // 4) Build response
+        const sharks = sharksDb
             .map((row) => {
-            const internalId = row.id; // PK in sharks table
-            const latest = latestPosByShark.get(internalId);
-            if (!latest) {
-                // No position yet; skip this shark (or return with dummy coords if you prefer)
-                return null;
-            }
-            const meta = row.meta || {};
-            const lastMoveTimestamp = latest.source_timestamp ??
-                latest.created_at ??
-                new Date().toISOString();
-            // Only use cached image_url from our own storage
-            const imageUrlFromDb = row.image_url ?? undefined;
+            const internalId = Number(row.id);
+            const externalIdRaw = row.external_id;
+            // external_id is TEXT in your schema; convert if numeric
+            const externalIdNum = externalIdRaw != null ? Number(externalIdRaw) : NaN;
+            const track = trackByShark.get(internalId) ?? [];
+            const latest = getLatest(track);
+            if (!latest)
+                return null; // cannot place on map if no positions exist
+            const apiId = Number.isFinite(externalIdNum) ? externalIdNum : internalId;
             const shark = {
-                // Expose external_id as "id" to keep compatibility with frontend
-                id: Number(row.external_id),
-                name: row.name ?? "Unnamed shark",
-                species: row.species ?? "Unknown shark",
-                gender: meta.gender ?? undefined,
-                stageOfLife: meta.stage_of_life ?? undefined,
-                length: meta.length ?? undefined,
-                weight: meta.weight ?? undefined,
-                lastMove: new Date(lastMoveTimestamp).toISOString(),
-                // zPing/zPingTime could also be stored in meta later if you want
+                id: apiId,
+                external_id: externalIdRaw ?? undefined,
+                name: row.name ?? `Shark ${externalIdRaw ?? internalId}`,
+                species: row.species ?? "Unknown species",
                 latitude: Number(latest.lat),
                 longitude: Number(latest.lng),
-                imageUrl: imageUrlFromDb,
-                // full track, keyed by internal shark.id
-                track: trackByShark.get(internalId) ?? [],
-                // approxSst will be added below
+                imageUrl: row.image_url ?? null,
+                last_update: latest.time ?? safeIso(row.updated_at),
+                track,
             };
             return shark;
         })
             .filter((s) => s !== null);
-        // 4) Add approximate SST (°C) using cached helper, sequentially to avoid 429
+        // 5) Add approximate SST (°C)
         const sharksWithSst = await addApproxSstToSharks(sharks);
         return res.json(sharksWithSst);
     }
-    catch (error) {
-        console.error("Error in /api/sharks (db-based):", error);
-        return res.status(500).json({ error: "Internal server error" });
+    catch (err) {
+        console.error("Error in GET /api/sharks:", err);
+        return res
+            .status(500)
+            .json({ error: err?.message ?? "Internal server error" });
     }
 });
 /**
  * GET /api/sharks/:id/track?hours=24
  *
- * :id    = external_id from Mapotic (same as `id` from /api/sharks)
- * hours  = how many hours back (default 24, max 30 days)
+ * :id can be:
+ *   - external_id (numeric-like string, most common)
+ *   - OR internal sharks.id (fallback)
  *
- * Uses Supabase tables:
- *   sharks(external_id) -> sharks(id)
- *   shark_positions(shark_id, lat, lng, source_timestamp, created_at)
+ * hours is OPTIONAL: how many hours back to return.
+ * If omitted, returns full history.
  */
 router.get("/sharks/:id/track", async (req, res) => {
     try {
-        const externalId = req.params.id; // Mapotic id as string
+        const idParam = req.params.id; // could be external_id or internal id
         const hoursRaw = req.query.hours;
-        const hours = Number(hoursRaw ?? "24");
-        const safeHours = !Number.isFinite(hours) || hours <= 0
-            ? 24
-            : Math.min(hours, 24 * 30); // max 30 days
-        const sinceIso = new Date(Date.now() - safeHours * 60 * 60 * 1000).toISOString();
-        // 1) find internal shark.id from external_id
-        const { data: sharkRow, error: sharkError } = await supabaseAdmin_1.supabaseAdmin
+        const hours = hoursRaw ? Number(hoursRaw) : null;
+        const sinceIso = hours != null && Number.isFinite(hours) && hours > 0
+            ? new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
+            : null;
+        // 1) Resolve internal shark id
+        // First try external_id match (stored as TEXT)
+        let internalId = null;
+        const { data: byExternal, error: extErr } = await supabaseAdmin_1.supabaseAdmin
             .from("sharks")
             .select("id")
-            .eq("external_id", externalId)
-            .single();
-        if (sharkError) {
-            console.error("Supabase sharks lookup error:", sharkError);
-            // frontend treats [] as "no data", so don't 500 here
+            .eq("external_id", idParam)
+            .maybeSingle();
+        if (extErr) {
+            console.error("Supabase sharks external_id lookup error:", extErr);
+            // continue to internal-id fallback
+        }
+        if (byExternal?.id != null) {
+            internalId = Number(byExternal.id);
+        }
+        else {
+            // fallback: treat param as internal numeric id
+            const asNum = Number(idParam);
+            if (Number.isFinite(asNum)) {
+                const { data: byInternal, error: intErr } = await supabaseAdmin_1.supabaseAdmin
+                    .from("sharks")
+                    .select("id")
+                    .eq("id", asNum)
+                    .maybeSingle();
+                if (intErr) {
+                    console.error("Supabase sharks internal id lookup error:", intErr);
+                }
+                else if (byInternal?.id != null) {
+                    internalId = Number(byInternal.id);
+                }
+            }
+        }
+        if (!internalId) {
             return res.json([]);
         }
-        if (!sharkRow) {
-            return res.json([]);
-        }
-        const sharkId = sharkRow.id;
-        // 2) get historical positions
-        const { data: positions, error: posError } = await supabaseAdmin_1.supabaseAdmin
+        // 2) Fetch positions (optionally filtered)
+        let q = supabaseAdmin_1.supabaseAdmin
             .from("shark_positions")
             .select("lat, lng, source_timestamp, created_at")
-            .eq("shark_id", sharkId)
-            .gte("created_at", sinceIso)
-            .order("created_at", { ascending: true });
+            .eq("shark_id", internalId);
+        if (sinceIso) {
+            q = q.gte("created_at", sinceIso);
+        }
+        const { data: positions, error: posError } = await q.order("created_at", {
+            ascending: true,
+        });
         if (posError) {
             console.error("Supabase shark_positions error:", posError);
             return res.status(500).json({ error: posError.message });
@@ -188,12 +200,12 @@ router.get("/sharks/:id/track", async (req, res) => {
         const result = positions?.map((row) => ({
             latitude: row.lat,
             longitude: row.lng,
-            timestamp: row.source_timestamp ?? row.created_at,
+            timestamp: pickMostRecentIso(row.source_timestamp, row.created_at),
         })) ?? [];
         return res.json(result);
     }
     catch (err) {
-        console.error("Error in /api/sharks/:id/track:", err);
+        console.error("Error in GET /api/sharks/:id/track:", err);
         return res
             .status(500)
             .json({ error: err?.message ?? "Internal server error" });
