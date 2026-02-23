@@ -12,15 +12,18 @@ const router = express_1.default.Router();
  * Adds approximate SST in °C for each shark using a cached helper.
  * Runs sequentially to avoid rate limiting (429).
  */
-async function addApproxSstToSharks(sharks) {
+async function addApproxOceanConditionsToSharks(sharks) {
     const out = [];
     for (const s of sharks) {
         try {
-            const sst = await (0, sstClient_1.fetchSeaSurfaceTemperature)(s.latitude, s.longitude);
-            out.push({ ...s, approxSst: sst ?? null });
+            const [sst, waveHeight] = await Promise.all([
+                (0, sstClient_1.fetchSeaSurfaceTemperature)(s.latitude, s.longitude),
+                (0, sstClient_1.fetchWaveHeight)(s.latitude, s.longitude),
+            ]);
+            out.push({ ...s, approxSst: sst ?? null, approxWaveHeight: waveHeight ?? null });
         }
         catch {
-            out.push({ ...s, approxSst: null });
+            out.push({ ...s, approxSst: null, approxWaveHeight: null });
         }
     }
     return out;
@@ -119,9 +122,9 @@ router.get("/sharks", async (_req, res) => {
             return shark;
         })
             .filter((s) => s !== null);
-        // 5) Add approximate SST (°C)
-        const sharksWithSst = await addApproxSstToSharks(sharks);
-        return res.json(sharksWithSst);
+        // 5) Add approximate ocean conditions
+        const sharksWithOcean = await addApproxOceanConditionsToSharks(sharks);
+        return res.json(sharksWithOcean);
     }
     catch (err) {
         console.error("Error in GET /api/sharks:", err);

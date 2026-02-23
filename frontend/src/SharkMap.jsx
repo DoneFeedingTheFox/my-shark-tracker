@@ -1,4 +1,4 @@
-﻿// src/SharkMap.jsx
+// src/SharkMap.jsx
 import { useEffect, useState, useRef, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
 import L from "leaflet";
@@ -823,8 +823,17 @@ export default function SharkMap() {
             <div className="stat-card">
               <div className="stat-label">Location</div>
               <div className="stat-value">
-                Lat: {selectedShark.latitude.toFixed(3)}, Lon:{" "}
+                Lat: {selectedShark.latitude.toFixed(3)}, Lon: {" "}
                 {selectedShark.longitude.toFixed(3)}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Ocean conditions (approx)</div>
+              <div className="stat-value">
+                SST: {selectedShark.approxSst != null ? `${selectedShark.approxSst.toFixed(1)} °C` : "n/a"}
+                <br />
+                Wave height: {selectedShark.approxWaveHeight != null ? `${selectedShark.approxWaveHeight.toFixed(1)} m` : "n/a"}
               </div>
             </div>
 

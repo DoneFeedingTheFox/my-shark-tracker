@@ -1,7 +1,7 @@
-﻿// backend/src/sharks.ts
+// backend/src/sharks.ts
 import express from "express";
 import { supabaseAdmin } from "./lib/supabaseAdmin";
-import { fetchSeaSurfaceTemperature } from "./lib/sstClient";
+import { fetchSeaSurfaceTemperature, fetchWaveHeight } from "./lib/sstClient";
 
 export interface SharkTrackPoint {
   lat: number;
@@ -29,14 +29,17 @@ const router = express.Router();
  * Adds approximate SST in °C for each shark using a cached helper.
  * Runs sequentially to avoid rate limiting (429).
  */
-async function addApproxSstToSharks(sharks: Shark[]): Promise<Shark[]> {
+async function addApproxOceanConditionsToSharks(sharks: Shark[]): Promise<Shark[]> {
   const out: Shark[] = [];
   for (const s of sharks) {
     try {
-      const sst = await fetchSeaSurfaceTemperature(s.latitude, s.longitude);
-      out.push({ ...s, approxSst: sst ?? null });
+      const [sst, waveHeight] = await Promise.all([
+        fetchSeaSurfaceTemperature(s.latitude, s.longitude),
+        fetchWaveHeight(s.latitude, s.longitude),
+      ]);
+      out.push({ ...s, approxSst: sst ?? null, approxWaveHeight: waveHeight ?? null });
     } catch {
-      out.push({ ...s, approxSst: null });
+      out.push({ ...s, approxSst: null, approxWaveHeight: null });
     }
   }
   return out;
@@ -156,9 +159,9 @@ router.get("/sharks", async (_req, res) => {
       })
       .filter((s): s is Shark => s !== null);
 
-    // 5) Add approximate SST (°C)
-    const sharksWithSst = await addApproxSstToSharks(sharks);
-    return res.json(sharksWithSst);
+    // 5) Add approximate ocean conditions
+    const sharksWithOcean = await addApproxOceanConditionsToSharks(sharks);
+    return res.json(sharksWithOcean);
   } catch (err: any) {
     console.error("Error in GET /api/sharks:", err);
     return res
