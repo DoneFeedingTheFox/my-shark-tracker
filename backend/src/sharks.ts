@@ -19,6 +19,7 @@ export interface Shark {
   imageUrl?: string | null;
   last_update?: string | null;
   approxSst?: number | null;
+  approxWaveHeight?: number | null;
   sourceProvider?: string;
   track?: SharkTrackPoint[];
 }

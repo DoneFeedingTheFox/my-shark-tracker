@@ -82,7 +82,7 @@
   right: 1.5rem;
 }
 
-/* Timeline – floating at bottom */
+/* Timeline Â– floating at bottom */
 
 .timeline-bar {
   margin-top: 0.75rem;
@@ -206,7 +206,7 @@
   opacity: 0.9;
 }
 
-/* Responsive – drawers become top sheets */
+/* Responsive Â– drawers become top sheets */
 
 @media (max-width: 800px) {
   .drawer {
@@ -243,4 +243,18 @@
 .leaflet-top.leaflet-left {
   top: 2.5rem !important;   /* push it down */
   left: -0.5rem !important; /* nudge it a bit right */
+}
+
+
+.freshness-marker-icon {
+  background: transparent;
+  border: none;
+}
+
+.freshness-marker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
