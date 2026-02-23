@@ -47,6 +47,19 @@ function safeIso(value: any): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function pickMostRecentIso(primary: any, fallback: any): string | null {
+  const primaryIso = safeIso(primary);
+  const fallbackIso = safeIso(fallback);
+
+  if (primaryIso && fallbackIso) {
+    return new Date(primaryIso).getTime() >= new Date(fallbackIso).getTime()
+      ? primaryIso
+      : fallbackIso;
+  }
+
+  return primaryIso ?? fallbackIso;
+}
+
 /**
  * GET /api/sharks
  *
@@ -98,10 +111,7 @@ router.get("/sharks", async (_req, res) => {
 
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-      const time =
-        (row.source_timestamp ?? row.created_at) as string | undefined;
-
-      const isoTime = safeIso(time);
+      const isoTime = pickMostRecentIso(row.source_timestamp, row.created_at);
       if (!isoTime) continue;
 
       const list = trackByShark.get(sid) ?? [];
@@ -238,7 +248,7 @@ router.get("/sharks/:id/track", async (req, res) => {
       (positions as any[] | null)?.map((row) => ({
         latitude: row.lat,
         longitude: row.lng,
-        timestamp: safeIso(row.source_timestamp ?? row.created_at),
+        timestamp: pickMostRecentIso(row.source_timestamp, row.created_at),
       })) ?? [];
 
     return res.json(result);
