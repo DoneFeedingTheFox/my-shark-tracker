@@ -55,7 +55,7 @@ router.get("/sharks", async (_req, res) => {
         // 1) Load all sharks
         const { data: sharkRows, error: sharkError } = await supabaseAdmin_1.supabaseAdmin
             .from("sharks")
-            .select("id, external_id, name, species, image_url, updated_at")
+            .select("id, external_id, name, species, image_url, updated_at, meta")
             .order("id", { ascending: true });
         if (sharkError) {
             console.error("Supabase sharks error:", sharkError);
@@ -113,6 +113,7 @@ router.get("/sharks", async (_req, res) => {
                 longitude: Number(latest.lng),
                 imageUrl: row.image_url ?? null,
                 last_update: latest.time ?? safeIso(row.updated_at),
+                sourceProvider: row.meta?.source_provider ?? "mapotic",
                 track,
             };
             return shark;
